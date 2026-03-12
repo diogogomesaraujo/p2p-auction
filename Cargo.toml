@@ -1,0 +1,12 @@
+[package]
+name = "p2p-auction"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+libp2p = {version = "0.56.0", features = ["tokio", "dns", "kad", "noise", "tcp", "yamux", "rsa"]}
+
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros"] }
+tokio-stream = "0.1.17"
+tokio-util = "0.7.17"
+tracing-subscriber = "0.3.22"
