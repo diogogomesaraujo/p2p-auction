@@ -1,5 +1,11 @@
-use libp2p::{StreamProtocol, SwarmBuilder, futures::StreamExt, identity, kad, noise, tcp, yamux};
-use std::{error::Error, num::NonZero, time::Duration};
+use libp2p::{
+    Multiaddr, StreamProtocol, SwarmBuilder,
+    futures::StreamExt,
+    identity,
+    kad::{self, Record, RecordKey},
+    noise, tcp, yamux,
+};
+use std::{error::Error, time::Duration};
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/ipfs/kad/1.0.0");
 
@@ -40,18 +46,39 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     swarm
         .behaviour_mut()
-        .get_n_closest_peers(self_key.public().to_peer_id(), NonZero::new(5).unwrap());
+        .get_closest_peers(self_key.public().to_peer_id());
+    swarm.dial(OTHER_PEER.parse::<Multiaddr>()?)?;
 
     loop {
         let event = swarm.select_next_some().await;
 
         match event {
             libp2p::swarm::SwarmEvent::Behaviour(kad::Event::OutboundQueryProgressed {
+                result: kad::QueryResult::PutRecord(Ok(ok)),
+                ..
+            }) => {
+                println!("Correctly put record near:\n{:?}", ok.key);
+            }
+            libp2p::swarm::SwarmEvent::Behaviour(kad::Event::OutboundQueryProgressed {
+                result: kad::QueryResult::PutRecord(Err(e)),
+                ..
+            }) => {
+                println!("Failed to put record near:\n{:?}", e);
+            }
+            libp2p::swarm::SwarmEvent::Behaviour(kad::Event::OutboundQueryProgressed {
                 result: kad::QueryResult::GetClosestPeers(Ok(ok)),
                 ..
             }) => {
-                println!("Closest Peers: {:?}", ok.peers);
-                return Ok(());
+                println!("Closest Peers:\n{:?}", ok.peers);
+                swarm.behaviour_mut().put_record(
+                    Record {
+                        key: RecordKey::new(&"key".as_bytes().to_vec()),
+                        value: "value".as_bytes().to_vec(),
+                        publisher: Some(self_key.public().to_peer_id()),
+                        expires: None,
+                    },
+                    kad::Quorum::One,
+                )?;
             }
             _ => {}
         }
