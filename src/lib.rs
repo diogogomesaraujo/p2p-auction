@@ -1,5 +1,5 @@
 use libp2p::{
-    StreamProtocol, Swarm, SwarmBuilder,
+    PeerId, StreamProtocol, Swarm, SwarmBuilder,
     futures::StreamExt,
     identity::Keypair,
     kad::{
@@ -16,7 +16,8 @@ use tokio::io::{AsyncBufReadExt, BufReader, Stdin};
 pub async fn kad_instance_init(
     ipfs_proto_name: StreamProtocol,
     key: Keypair,
-) -> Result<Swarm<Behaviour<MemoryStore>>, Box<dyn Error>> {
+    bootstrap_nodes: &[&str],
+) -> Result<Swarm<Behaviour<MemoryStore>>, Box<dyn Error + Send + Sync>> {
     let mut swarm = SwarmBuilder::with_existing_identity(key)
         .with_tokio()
         .with_tcp(
@@ -33,6 +34,13 @@ pub async fn kad_instance_init(
         })?
         .build();
 
+    for node in bootstrap_nodes {
+        swarm.behaviour_mut().add_address(
+            &node.parse::<PeerId>()?,
+            "/dnsaddr/bootstrap.libp2p.io".parse()?,
+        );
+    }
+
     swarm.behaviour_mut().set_mode(Some(Mode::Server));
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
@@ -42,17 +50,79 @@ pub async fn kad_instance_init(
 pub async fn kad_run(
     swarm: &mut Swarm<Behaviour<MemoryStore>>,
     buffer_reader: BufReader<Stdin>,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut lines = buffer_reader.lines();
     loop {
         tokio::select! {
             Ok(Some(line)) = lines.next_line() => {
                 let mut args = line.split_whitespace();
                 match args.next() {
-                    Some("GET_VALUE") => {}
-                    Some("PUT_VALUE") => {}
-                    Some("GET_PROVIDER") => {}
-                    Some("PUT_PROVIDER") => {}
+                    Some("GET_VALUE") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => kad::RecordKey::new(&key),
+                                None => {
+                                    eprintln!("Expected key");
+                                     continue;
+                                }
+                            }
+                        };
+                        swarm.behaviour_mut().get_record(key);
+                    }
+                    Some("GET_PROVIDERS") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => kad::RecordKey::new(&key),
+                                None => {
+                                    eprintln!("Expected key");
+                                    continue;
+                                }
+                            }
+                        };
+                        swarm.behaviour_mut().get_providers(key);
+                    }
+                    Some("PUT_VALUE") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => kad::RecordKey::new(&key),
+                                None => {
+                                    eprintln!("Expected key");
+                                    continue;
+                                }
+                            }
+                        };
+                        let value = {
+                            match args.next() {
+                                Some(value) => value.as_bytes().to_vec(),
+                                None => {
+                                    eprintln!("Expected value");
+                                    continue;
+                                }
+                            }
+                        };
+                        let record = kad::Record {
+                            key,
+                            value,
+                            publisher: None,
+                            expires: None,
+                        };
+                        swarm.behaviour_mut()
+                            .put_record(record, kad::Quorum::Majority)?;
+                    }
+                    Some("PUT_PROVIDER") => {
+                        let key = {
+                            match args.next() {
+                                Some(key) => kad::RecordKey::new(&key),
+                                None => {
+                                    eprintln!("Expected key");
+                                    continue;
+                                }
+                            }
+                        };
+
+                        swarm.behaviour_mut()
+                            .start_providing(key)?;
+                    }
                     _ => {}
                 }
             }
@@ -63,7 +133,7 @@ pub async fn kad_run(
                             QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(
                                 PeerRecord { record: Record { key, value, .. }, .. }
                             ))) => {
-                                println!("Received GET_VALUE successful response: key: {:?}, value: {:?}", key, value);
+                                println!("Received GET_VALUE successful response: key: {:?}, value: {}", key, String::from_utf8(value)?);
                             }
                             QueryResult::GetRecord(Err(e)) => {
                                 eprintln!("Received GET_VALUE error: {e}");
