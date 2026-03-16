@@ -1,5 +1,5 @@
 use libp2p::{
-    PeerId, StreamProtocol, Swarm, SwarmBuilder,
+    Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder,
     futures::StreamExt,
     identity::Keypair,
     kad::{
@@ -57,13 +57,41 @@ pub async fn kad_run(
             Ok(Some(line)) = lines.next_line() => {
                 let mut args = line.split_whitespace();
                 match args.next() {
+                    Some("ADD_ADDRESS") => {
+                        let peer_id = match args.next() {
+                            Some(peer_id) => peer_id.parse::<PeerId>()?,
+                            None => {
+                                eprintln!("Expected peer id");
+                                continue;
+                            }
+                        };
+                        let address = match args.next() {
+                            Some(address) => address.parse::<Multiaddr>()?,
+                            None => {
+                                eprintln!("Expected address");
+                                continue;
+                            }
+                        };
+                        swarm.behaviour_mut().add_address(&peer_id, address);
+                    }
+                    Some("PING") => {
+                        let (address_str, address) = match args.next() {
+                            Some(address) => (address, address.parse::<Multiaddr>()?),
+                            None => {
+                                eprintln!("Expected address");
+                                continue;
+                            }
+                        };
+                        swarm.dial(address)?;
+                        println!("Dialed {address_str}")
+                    }
                     Some("GET_VALUE") => {
                         let key = {
                             match args.next() {
                                 Some(key) => kad::RecordKey::new(&key),
                                 None => {
                                     eprintln!("Expected key");
-                                     continue;
+                                    continue;
                                 }
                             }
                         };
@@ -107,7 +135,7 @@ pub async fn kad_run(
                             expires: None,
                         };
                         swarm.behaviour_mut()
-                            .put_record(record, kad::Quorum::Majority)?;
+                            .put_record(record, kad::Quorum::One)?;
                     }
                     Some("PUT_PROVIDER") => {
                         let key = {
@@ -128,6 +156,10 @@ pub async fn kad_run(
             }
             event = swarm.select_next_some() => {
                 match event {
+                    SwarmEvent::NewListenAddr { address, .. } => println!("Listening on {address:?}"),
+                    SwarmEvent::Behaviour(Event::RoutingUpdated { peer, is_new_peer, addresses, ..}) => {
+                        println!("Routing table updated: {peer:?}, is it a new peer? {is_new_peer}, addresses: {addresses:?}");
+                    },
                     SwarmEvent::Behaviour(Event::OutboundQueryProgressed { result, .. }) => {
                         match result {
                             QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(
@@ -162,7 +194,8 @@ pub async fn kad_run(
 
                             _ => {}
                         }
-                    }
+                    },
+                    SwarmEvent::Behaviour(event) => println!("{event:?}"),
                     _ => {}
                 }
             }
