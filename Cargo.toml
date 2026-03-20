@@ -5,8 +5,17 @@ edition = "2024"
 
 [dependencies]
 clap = "4.6.0"
-libp2p = {version = "0.56.0", features = ["tokio", "dns", "macros", "kad", "noise", "tcp", "yamux", "rsa"]}
-
+libp2p = { version = "0.56.0", features = [
+  "tokio",
+  "tcp",
+  "dns",
+  "noise",
+  "yamux",
+  "kad",
+  "ping",
+  "identify",
+  "macros",
+] }
 tokio = { version = "1.48.0", features = ["full"] }
 tokio-stream = "0.1.17"
 tokio-util = "0.7.17"
