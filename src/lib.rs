@@ -65,6 +65,7 @@ pub async fn kad_instance_init(
 
             let mut kad_cfg = kad::Config::new(ipfs_proto_name.clone());
             kad_cfg.set_query_timeout(Duration::from_secs(60));
+            kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
 
             let store = kad::store::MemoryStore::new(key.public().to_peer_id());
 
@@ -90,14 +91,28 @@ pub async fn kad_instance_init(
         .build();
 
     for node in bootstrap_nodes {
-        swarm.behaviour_mut().kad.add_address(
-            &node.parse::<PeerId>()?,
-            "/dnsaddr/bootstrap.libp2p.io".parse()?,
-        );
+        let bootstrap_addr: Multiaddr = node.parse()?;
+
+        let bootstrap_id = match bootstrap_addr.iter().last() {
+            Some(libp2p::multiaddr::Protocol::P2p(id)) => id,
+            _ => {
+                return Err("didn't find a valid bootstrap node".into());
+            }
+        };
+
+        swarm
+            .behaviour_mut()
+            .kad
+            .add_address(&bootstrap_id, bootstrap_addr);
+        swarm.dial(bootstrap_id)?;
     }
 
     swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+    // swarm
+    //     .behaviour_mut()
+    //     .kad
+    //     .get_closest_peers(swarm.local_peer_id());
 
     Ok(swarm)
 }
@@ -242,6 +257,13 @@ pub async fn kad_run(
 
                         let _ = swarm.behaviour_mut().kad.bootstrap();
                     },
+
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        swarm
+                            .behaviour_mut()
+                            .kad
+                            .add_address(&peer_id, endpoint.get_remote_address().clone());
+                    }
 
                     _ => {}
                 }
