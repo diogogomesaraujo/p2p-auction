@@ -1,5 +1,5 @@
 use libp2p::{StreamProtocol, identity};
-use p2p_auction::{kad_instance_init, kad_run};
+use p2p_auction::kad;
 use std::error::Error;
 use tokio::io::{BufReader, stdin};
 
@@ -18,8 +18,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let self_key = identity::Keypair::generate_ed25519();
 
-    let mut i = kad_instance_init(IPFS_PROTO_NAME, self_key, &BOOT_NODES).await?;
-    kad_run(&mut i, BufReader::new(stdin())).await?;
+    let mut i = kad::init(IPFS_PROTO_NAME, self_key, &BOOT_NODES).await?;
+    kad::run(&mut i, BufReader::new(stdin())).await?;
 
     Ok(())
 }
