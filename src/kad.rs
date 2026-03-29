@@ -10,11 +10,12 @@ use libp2p::{
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
-use std::{error::Error, str::SplitWhitespace, time::Duration};
+use std::{error::Error, fs::File, io::Write, str::SplitWhitespace, time::Duration};
 use tokio::io::{AsyncBufReadExt, BufReader, Stdin};
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
+pub const CONFIG_DIR: &str = "config";
 
 //similar to example from https://docs.rs/libp2p/latest/libp2p/swarm/trait.NetworkBehaviour.html
 #[derive(NetworkBehaviour)]
@@ -38,7 +39,12 @@ impl MyBehaviourEvent {
         swarm: &mut Swarm<MyBehaviour>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match event {
-            SwarmEvent::NewListenAddr { address, .. } => println!("Listening on {address:?}"),
+            SwarmEvent::NewListenAddr { address, .. } => {
+                let config = Config::from(address, *swarm.local_peer_id());
+                config.to_file()?;
+
+                println!("Listening on {:?}", config.address);
+            }
             SwarmEvent::Behaviour(MyBehaviourEvent::Kad(kad::Event::RoutingUpdated {
                 peer,
                 is_new_peer,
@@ -291,6 +297,7 @@ pub async fn run(
     buffer_reader: BufReader<Stdin>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut lines = buffer_reader.lines();
+
     loop {
         tokio::select! {
             Ok(Some(line)) = lines.next_line() => {
@@ -302,5 +309,23 @@ pub async fn run(
                 MyBehaviourEvent::from_event(event, swarm)?;
             }
         }
+    }
+}
+
+pub struct Config {
+    pub address: Multiaddr,
+    pub peer_id: PeerId,
+}
+
+impl Config {
+    pub fn from(address: Multiaddr, peer_id: PeerId) -> Self {
+        Self { address, peer_id }
+    }
+
+    pub fn to_file(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut file = File::create(format!("{CONFIG_DIR}/{}", self.peer_id.to_string()))?;
+        file.write(format!("{} {}\n", self.address, self.peer_id).as_bytes())?;
+
+        Ok(())
     }
 }
