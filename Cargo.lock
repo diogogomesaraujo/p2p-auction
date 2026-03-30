@@ -1978,6 +1978,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tracing",
  "tracing-subscriber",
 ]
 

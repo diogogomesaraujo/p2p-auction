@@ -12,6 +12,7 @@ use libp2p::{
 };
 use std::{error::Error, fs::File, io::Write, str::SplitWhitespace, time::Duration};
 use tokio::io::{AsyncBufReadExt, BufReader, Stdin};
+use tracing::{error, info};
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
@@ -43,17 +44,14 @@ impl MyBehaviourEvent {
                 let config = Config::from(address, *swarm.local_peer_id());
                 config.to_file()?;
 
-                println!("Listening on {:?}", config.address);
+                info!("Listening on {:?}.", config.address);
             }
             SwarmEvent::Behaviour(MyBehaviourEvent::Kad(kad::Event::RoutingUpdated {
                 peer,
-                is_new_peer,
                 addresses,
                 ..
             })) => {
-                println!(
-                    "Routing table updated: {peer:?}, is it a new peer? {is_new_peer}, addresses: {addresses:?}"
-                );
+                info!("Routing table updated with peer id {peer:?}, and addresses {addresses:?}.");
             }
             SwarmEvent::Behaviour(MyBehaviourEvent::Kad(kad::Event::OutboundQueryProgressed {
                 result,
@@ -61,32 +59,32 @@ impl MyBehaviourEvent {
             })) => {
                 match result {
                     QueryResult::GetClosestPeers(Ok(ok)) => {
-                        println!("FIND_NODE result: {:?}", ok.peers);
+                        info!("The current closets peers: {:?}.", ok.peers);
                     }
 
                     QueryResult::GetClosestPeers(Err(e)) => {
-                        eprintln!("FIND_NODE error: {}", e);
+                        error!("Couldn't find the node at {:?}.", e.key());
                     }
 
                     QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(PeerRecord {
                         record: Record { key, value, .. },
                         ..
                     }))) => {
-                        println!(
-                            "Received FIND_VALUE successful response: key: {:?}, value: {}",
+                        info!(
+                            "Successfully found value {} at {:?}.",
+                            String::from_utf8(value)?,
                             key,
-                            String::from_utf8(value)?
                         );
                     }
                     QueryResult::GetRecord(Err(e)) => {
-                        eprintln!("Received FIND_VALUE error: {e}");
+                        error!("Failed to find value at {:?}.", e.key());
                     }
 
                     QueryResult::PutRecord(Ok(PutRecordOk { key })) => {
-                        println!("Received STORE successful response: key: {:?}", key);
+                        info!("Successfully stored the value at {:?}", key);
                     }
                     QueryResult::PutRecord(Err(e)) => {
-                        eprintln!("Received STORE error: {e}");
+                        error!("Failed to store the value requested at {:?}.", e.key());
                     }
 
                     // QueryResult::GetProviders(Ok(GetProvidersOk::FoundProviders { key, providers, .. })) => {
@@ -107,7 +105,12 @@ impl MyBehaviourEvent {
             }
 
             SwarmEvent::Behaviour(MyBehaviourEvent::Ping(event)) => {
-                println!("PING event: {event:?}");
+                info!(
+                    "Ping event: {}, {}, {:?}.",
+                    event.connection,
+                    event.peer.to_string(),
+                    event.result
+                );
             }
 
             SwarmEvent::Behaviour(MyBehaviourEvent::Identify(identify::Event::Received {
@@ -161,6 +164,7 @@ pub enum Rpc {
     Store,
     FindNode,
     FindValue,
+    RoutingTable,
 }
 
 impl Rpc {
@@ -170,6 +174,7 @@ impl Rpc {
             "STORE" => Some(Self::Store),
             "FIND_VALUE" => Some(Self::FindValue),
             "FIND_NODE" => Some(Self::FindNode),
+            "ROUTING_TABLE" => Some(Self::RoutingTable),
             _ => None,
         }
     }
@@ -222,6 +227,13 @@ impl Rpc {
             Self::FindValue => {
                 let key = kad::RecordKey::new(&arg_parse(args)?);
                 swarm.behaviour_mut().kad.get_record(key);
+            }
+
+            Self::RoutingTable => {
+                info!(
+                    "Current state of the routing table: {:?}",
+                    swarm.connected_peers().collect::<Vec<&PeerId>>(),
+                );
             }
         }
 
