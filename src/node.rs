@@ -24,6 +24,12 @@ use tracing::info;
 
 pub struct Node {
     pub bootstrap_nodes: Vec<(Multiaddr, PeerId)>,
+    // TODO(TRUST + ECLIPSE + SYBIL):
+    // Later add local policy state here or in a separate manager:
+    // - trusted peers
+    // - quarantined peers
+    // - peer score cache
+    // - admission policy
 }
 
 pub enum RpcAction {
@@ -87,6 +93,15 @@ impl Rpc for Node {
                 kad_cfg.set_query_timeout(Duration::from_secs(60));
                 kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
 
+                // TODO(CHURN):
+                // Also define / document:
+                // - record TTL / expiration
+                // - republish interval
+                // - bucket refresh interval
+                // - replication factor
+                //
+                // Right now only periodic bootstrap exists, which is not enough.
+
                 let store = kad::store::MemoryStore::new(local_id);
                 let kad = kad::Behaviour::with_config(local_id, store, kad_cfg);
 
@@ -113,6 +128,13 @@ impl Rpc for Node {
                     .message_id_fn(message_id_fn)
                     .build()?;
 
+                // TODO(LEDGER SUPPORT):
+                // Add anti-spam controls to gossip:
+                // - message size bounds
+                // - rate limiting
+                // - per-peer penalty hooks
+                // - custom validation hooks per topic
+
                 let mut gossip = gossipsub::Behaviour::new(
                     MessageAuthenticity::Signed(key.clone()),
                     gossip_config,
@@ -135,6 +157,11 @@ impl Rpc for Node {
             .build();
 
         for (bootstrap_addr, bootstrap_id) in &self.bootstrap_nodes {
+            // TODO(ECLIPSE):
+            // Bootstrap nodes are trusted entry points for now, but long term:
+            // - use multiple bootstrap peers
+            // - prefer disjoint / diverse bootstrap origins
+            // - avoid over-reliance on a single entry path
             swarm
                 .behaviour_mut()
                 .kad
@@ -157,6 +184,9 @@ impl Rpc for Node {
             RpcAction::Ping => {
                 let address = Self::arg_parse(args)?.parse::<Multiaddr>()?;
                 swarm.dial(address)?;
+
+                // TODO(TRUST):
+                // Prefer dialing known / trusted peers first when there is a choice.
             }
 
             RpcAction::Store => {
@@ -170,20 +200,40 @@ impl Rpc for Node {
                     expires: None,
                 };
 
+                // TODO(CHURN):
+                // expires: None is too weak for churn handling.
+                // Later:
+                // - set explicit expiration
+                // - track ownership of locally published records
+                // - republish before expiration
+                // - configure replication factor / quorum
+
                 swarm
                     .behaviour_mut()
                     .kad
                     .put_record(record, kad::Quorum::One)?;
+
+                // TODO(TRUST):
+                // Quorum::One is simple but weak.
+                // Later prefer:
+                // - quorum based on replication policy
+                // - trusted peers when selecting storage targets
             }
 
             RpcAction::FindNode => {
                 let peer = Self::arg_parse(args)?.parse::<PeerId>()?;
                 swarm.behaviour_mut().kad.get_closest_peers(peer);
+
+                // TODO(ECLIPSE + BYZANTINE):
+                // Later perform parallel / disjoint lookup paths and compare answers.
             }
 
             RpcAction::FindValue => {
                 let key = kad::RecordKey::new(&Self::arg_parse(args)?);
                 swarm.behaviour_mut().kad.get_record(key);
+
+                // TODO(BYZANTINE):
+                // Later require stronger confidence than "first answer wins".
             }
 
             RpcAction::RoutingTable => {
@@ -191,6 +241,14 @@ impl Rpc for Node {
                     "Current state of the routing table: {:?}",
                     swarm.connected_peers().collect::<Vec<&PeerId>>(),
                 );
+
+                // TODO(TRUST + ECLIPSE):
+                // Expose richer diagnostics later:
+                // - peer score
+                // - age
+                // - subnet
+                // - suspicion state
+                // - bucket diversity status
             }
 
             RpcAction::Transaction => {
@@ -199,6 +257,13 @@ impl Rpc for Node {
                     libp2p_gossipsub::IdentTopic::new(Topic::TRANSACTIONS),
                     payload,
                 )?;
+
+                // TODO(LEDGER SUPPORT):
+                // Only overlay dissemination now.
+                // Later add:
+                // - spam controls
+                // - schema validation
+                // - content-address indexing hook
             }
 
             RpcAction::Block => {
@@ -207,6 +272,9 @@ impl Rpc for Node {
                     .behaviour_mut()
                     .gossip
                     .publish(libp2p_gossipsub::IdentTopic::new(Topic::BLOCKS), payload)?;
+
+                // TODO(LEDGER SUPPORT):
+                // Announcements should point to retrievable block content later.
             }
 
             RpcAction::Metadata => {
@@ -215,6 +283,9 @@ impl Rpc for Node {
                     libp2p_gossipsub::IdentTopic::new(Topic::OVERLAY_META),
                     payload,
                 )?;
+
+                // TODO(ANTI-IMPERSONATION):
+                // Publish signed metadata, not plain unsigned JSON.
             }
 
             RpcAction::Reputation => {
@@ -223,6 +294,9 @@ impl Rpc for Node {
                     libp2p_gossipsub::IdentTopic::new(Topic::PEER_REPUTATION),
                     payload,
                 )?;
+
+                // TODO(TRUST):
+                // Remote reputation reports must be bounded and validated.
             }
 
             RpcAction::Suspicious => {
@@ -231,6 +305,10 @@ impl Rpc for Node {
                     libp2p_gossipsub::IdentTopic::new(Topic::SUSPICIOUS_PEERS),
                     payload,
                 )?;
+
+                // TODO(TRUST + BYZANTINE):
+                // Suspicion reports should not directly blacklist peers.
+                // They should feed a local threshold-based suspicion model.
             }
 
             RpcAction::Liveness => {
@@ -239,6 +317,9 @@ impl Rpc for Node {
                     .behaviour_mut()
                     .gossip
                     .publish(libp2p_gossipsub::IdentTopic::new(Topic::LIVENESS), payload)?;
+
+                // TODO(CHURN):
+                // Use this as auxiliary liveness information only.
             }
         }
 

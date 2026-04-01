@@ -8,6 +8,14 @@ use crate::behaviour::{MyBehaviour, MyBehaviourEvent};
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
+// TODO:
+// Rpc actions currently trigger direct operations only.
+// Later add policy-aware wrappers so actions can:
+// - prefer trusted peers
+// - avoid quarantined peers
+// - trigger retries on alternate paths
+// - enforce lookup/store cross-checking
+
 #[async_trait]
 pub trait Rpc: 'static {
     type RpcAction;
@@ -61,6 +69,15 @@ pub trait Rpc: 'static {
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut lines = buffer_reader.lines();
+
+        // TODO(CHURN):
+        // This event loop currently has no periodic maintenance task.
+        // Later add timed maintenance branches for:
+        // - bucket refresh
+        // - republish / refresh of local records
+        // - trust decay
+        // - quarantine expiry / blacklist maintenance
+        // - stale peer cleanup
 
         loop {
             tokio::select! {

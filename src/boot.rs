@@ -20,6 +20,17 @@ use tracing::info;
 
 pub struct BootNode(Multiaddr);
 
+// TODO(ECLIPSE):
+// A single bootstrap node is a weak point.
+// Later recommend:
+// - multiple bootstrap nodes
+// - different subnets / operators
+// - diverse entry points
+//
+// TODO(TRUST):
+// Bootstrap node may later help seed initial trust / admission policy,
+// but it should not be a permanent centralized authority unless intended.
+
 pub enum RpcAction {
     Ping,
     RoutingTable,
@@ -62,6 +73,14 @@ impl Rpc for BootNode {
                 let mut kad_cfg = kad::Config::new(ipfs_proto_name.clone());
                 kad_cfg.set_query_timeout(Duration::from_secs(60));
                 kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
+
+                // TODO(CHURN):
+                // Periodic bootstrap is only one piece.
+                // Still missing:
+                // - bucket refresh of stale ranges
+                // - republish of records
+                // - expiration / refresh policy
+                // - availability strategy under churn
 
                 let store = kad::store::MemoryStore::new(local_id);
                 let kad = kad::Behaviour::with_config(local_id, store, kad_cfg);
