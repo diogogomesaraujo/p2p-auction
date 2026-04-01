@@ -2085,6 +2085,8 @@ dependencies = [
  "clap",
  "libp2p",
  "libp2p-gossipsub",
+ "serde",
+ "serde_json",
  "tokio",
  "tokio-stream",
  "tokio-util",

@@ -27,6 +27,15 @@ pub trait Rpc: 'static {
         }
     }
 
+    fn remaining_args(args: &mut SplitWhitespace) -> Result<String, Box<dyn Error + Send + Sync>> {
+        let rest = args.collect::<Vec<_>>().join(" ");
+        if rest.is_empty() {
+            Err("Insufficient arguments".into())
+        } else {
+            Ok(rest)
+        }
+    }
+
     fn execute_action(
         args: &mut SplitWhitespace,
         swarm: &mut Swarm<MyBehaviour>,

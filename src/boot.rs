@@ -1,4 +1,4 @@
-use crate::{Topic, behaviour::MyBehaviour, rpc::Rpc};
+use crate::{behaviour::MyBehaviour, gossip::Topic, rpc::Rpc};
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
@@ -97,6 +97,9 @@ impl Rpc for BootNode {
                 gossip.subscribe(&IdentTopic::new(Topic::TRANSACTIONS))?;
                 gossip.subscribe(&IdentTopic::new(Topic::BLOCKS))?;
                 gossip.subscribe(&IdentTopic::new(Topic::OVERLAY_META))?;
+                gossip.subscribe(&IdentTopic::new(Topic::PEER_REPUTATION))?;
+                gossip.subscribe(&IdentTopic::new(Topic::SUSPICIOUS_PEERS))?;
+                gossip.subscribe(&IdentTopic::new(Topic::LIVENESS))?;
 
                 Ok(MyBehaviour {
                     kad,
