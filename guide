@@ -1,0 +1,107 @@
+PART A — MISSING / TO COMPLETE
+
+1. CHURN / AVAILABILITY
+
+Missing:
+- replication policy
+- expiration policy
+- refresh / republish logic
+- bucket refresh
+- record republishing
+- availability under churn
+
+2. TRUST MECHANISM
+
+Missing:
+- peer scoring
+- reputation table
+- trust decay
+- suspicion tracking
+- penalties for bad responses
+- preference for trusted peers during lookup / store / gossip
+- blacklisting / quarantine
+
+
+3. SYBIL RESISTANCE
+
+Current issue:
+A malicious actor can generate many Ed25519 identities and appear as many peers.
+
+Using libp2p identities guarantees uniqueness of one keypair but does not prevent cheap multiple identities.
+
+Need at least one of:
+- proof-of-work / costly identity generation
+- rate-limited identity registration
+- identity age weighting
+- resource testing
+- peer diversity constraints per bucket / subnet / prefix
+
+
+4. ECLIPSE ATTACK MITIGATION
+
+Current issue:
+Peers are added when:
+- identify reveals listen addresses
+- connection is established
+- bootstrap peers are manually inserted
+
+Missing:
+- bucket diversity constraints
+- IP / subnet diversity
+- per-prefix limits
+- preference for long-lived peers
+- peer scoring before insertion / promotion
+- verified address ownership where possible
+- multiple disjoint lookups
+- result cross-checking
+
+
+5. ANTI-IMPERSONATION BEYOND TRANSPORT IDENTITY
+
+Already partly addressed by:
+- Noise + PeerId binding
+
+Still missing:
+- identity admission policy
+- signed overlay metadata
+- persistent trust binding for peer history
+- stronger validation of claimed addresses / node metadata
+
+
+6. BYZANTINE HANDLING AT OVERLAY LEVEL
+
+Current issue:
+If a node:
+- drops requests
+- returns fake records
+- selectively forwards
+- gives poisoned routing info
+- stalls connections
+
+Current code mostly logs events.
+
+Missing:
+- detect misbehavior
+- compare conflicting answers
+- retry through alternate peers
+- lower reputation
+- quarantine peers
+- stronger read confidence / result cross-checking
+- verify signed metadata received through gossip
+
+
+7. LEDGER SUPPORT AT OVERLAY LEVEL
+
+The prompt says the overlay must support the ledger layer.
+
+Keep only infrastructure here:
+- block announcement topic
+- transaction announcement topic
+- content-addressed lookup hooks
+- provider / indexing strategy
+- anti-spam filtering for gossip traffic
+- signed metadata / validation hooks
+
+Important:
+This is still Part A only as overlay support.
+Full ledger validation belongs later.
