@@ -3,11 +3,13 @@ use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
     identity::Keypair,
-    kad::{self, Mode},
+    kad::{self, K_VALUE, Mode},
     noise, ping, tcp, yamux,
 };
 
-use libp2p_gossipsub::{self as gossipsub, IdentTopic, MessageAuthenticity, MessageId};
+use libp2p_gossipsub::{
+    self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
+};
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -73,6 +75,11 @@ impl Rpc for BootNode {
                 let mut kad_cfg = kad::Config::new(ipfs_proto_name.clone());
                 kad_cfg.set_query_timeout(Duration::from_secs(60));
                 kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
+                kad_cfg.set_record_ttl(Some(Duration::from_secs(36 * 60 * 60)));
+                kad_cfg.set_replication_interval(Some(Duration::from_secs(60 * 60)));
+                kad_cfg.set_publication_interval(Some(Duration::from_secs(24 * 60 * 60)));
+                kad_cfg.set_replication_factor(K_VALUE);
+                kad_cfg.disjoint_query_paths(true);
 
                 // TODO(CHURN):
                 // Periodic bootstrap is only one piece.
@@ -104,7 +111,7 @@ impl Rpc for BootNode {
 
                 let gossip_config = gossipsub::ConfigBuilder::default()
                     .heartbeat_interval(Duration::from_secs(10))
-                    .validation_mode(libp2p_gossipsub::ValidationMode::Strict)
+                    .validation_mode(ValidationMode::Strict)
                     .message_id_fn(message_id_fn)
                     .build()?;
 

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
     identity::Keypair,
-    kad::{self, Mode},
+    kad::{self, K_VALUE, Mode},
     noise, ping, tcp, yamux,
 };
 use libp2p_gossipsub::{
@@ -17,6 +17,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     error::Error,
     hash::{Hash, Hasher},
+    num::NonZeroUsize,
     str::SplitWhitespace,
     time::Duration,
 };
@@ -89,9 +90,15 @@ impl Rpc for Node {
             .with_behaviour(|key| {
                 let local_id = key.public().to_peer_id();
 
+                // all default values that can be ommited. explicit for development
                 let mut kad_cfg = kad::Config::new(ipfs_proto_name.clone());
                 kad_cfg.set_query_timeout(Duration::from_secs(60));
                 kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
+                kad_cfg.set_record_ttl(Some(Duration::from_secs(36 * 60 * 60)));
+                kad_cfg.set_replication_interval(Some(Duration::from_secs(60 * 60)));
+                kad_cfg.set_publication_interval(Some(Duration::from_secs(24 * 60 * 60)));
+                kad_cfg.set_replication_factor(K_VALUE);
+                kad_cfg.disjoint_query_paths(true);
 
                 // TODO(CHURN):
                 // Also define / document:

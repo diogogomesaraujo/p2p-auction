@@ -248,8 +248,6 @@ impl MyBehaviourEvent {
                         swarm.behaviour_mut().kad.add_address(&peer_id, addr);
                     }
 
-                    let _ = swarm.behaviour_mut().kad.bootstrap();
-
                     // TODO(CHURN):
                     // Bucket refresh should be scheduled deliberately, not triggered on every identify.
                     // Replace this eager bootstrap with:
