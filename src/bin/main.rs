@@ -1,6 +1,7 @@
+use clap::Parser;
 use libp2p::{Multiaddr, PeerId, StreamProtocol, identity};
 use p2p_auction::{node::Node, rpc::Rpc};
-use std::error::Error;
+use std::{error::Error, thread::sleep, time::Duration};
 use tokio::io::{BufReader, stdin};
 use tracing::info;
 
@@ -29,6 +30,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     info!("Running DHT node.");
 
     let self_key = identity::Keypair::generate_ed25519();
+
+    sleep(Duration::from_secs(1));
 
     let node = Node::new(boot_nodes_from_str(&BOOT_NODES)?);
 

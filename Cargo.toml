@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.89"
-clap = "4.6.0"
+clap = {version = "=4.5.61", features = ["derive"]}
 libp2p = { version = "0.56.0", features = [
   "tokio",
   "tcp",

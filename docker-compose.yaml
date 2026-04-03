@@ -6,5 +6,14 @@ services:
       - MODE=boot
   node:
     image: p2p-auction
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
     environment:
       - MODE=main
+    scale: 6
+
+networks:
+  default:
+    driver: bridge
