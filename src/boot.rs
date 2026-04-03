@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
     identity::Keypair,
-    kad::{self, K_VALUE, Mode},
+    kad::{self, ALPHA_VALUE, K_VALUE, Mode},
     noise, ping, tcp, yamux,
 };
 
@@ -80,6 +80,7 @@ impl Rpc for BootNode {
                 kad_cfg.set_publication_interval(Some(Duration::from_secs(24 * 60 * 60)));
                 kad_cfg.set_replication_factor(K_VALUE);
                 kad_cfg.disjoint_query_paths(true);
+                kad_cfg.set_parallelism(ALPHA_VALUE);
 
                 // TODO(CHURN):
                 // Periodic bootstrap is only one piece.

@@ -218,7 +218,7 @@ impl Rpc for Node {
                 swarm
                     .behaviour_mut()
                     .kad
-                    .put_record(record, kad::Quorum::One)?;
+                    .put_record(record, kad::Quorum::N(NonZeroUsize::new(3).unwrap()))?;
 
                 // TODO(TRUST):
                 // Quorum::One is simple but weak.
