@@ -1,4 +1,3 @@
-use clap::Parser;
 use libp2p::{Multiaddr, PeerId, StreamProtocol, identity};
 use p2p_auction::{node::Node, rpc::Rpc};
 use std::{error::Error, thread::sleep, time::Duration};

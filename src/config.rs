@@ -1,5 +1,5 @@
 use libp2p::{Multiaddr, PeerId};
-use std::{error::Error, fs::File, io::Write};
+use std::error::Error;
 
 pub const CONFIG_DIR: &str = "config";
 

@@ -4,6 +4,8 @@ services:
     image: p2p-auction
     environment:
       - MODE=boot
+    networks:
+      - p2p-net
   node:
     image: p2p-auction
     depends_on:
@@ -12,8 +14,10 @@ services:
         restart: true
     environment:
       - MODE=main
+    networks:
+      - p2p-net
     scale: 6
 
 networks:
-  default:
+  p2p-net:
     driver: bridge
