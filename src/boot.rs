@@ -1,16 +1,13 @@
-use crate::{behaviour::MyBehaviour, gossip::Topic, rpc::Rpc};
 use async_trait::async_trait;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
     identity::Keypair,
     kad::{self, ALPHA_VALUE, K_VALUE, Mode},
     noise, ping, tcp, yamux,
 };
-
 use libp2p_gossipsub::{
     self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
 };
-
 use std::{
     collections::hash_map::DefaultHasher,
     error::Error,
@@ -20,18 +17,9 @@ use std::{
 };
 use tracing::info;
 
-pub struct BootNode(Multiaddr);
+use crate::{behaviour::MyBehaviour, gossip::Topic, rpc::Rpc, runtime::Runtime, state::State};
 
-// TODO(ECLIPSE):
-// A single bootstrap node is a weak point.
-// Later recommend:
-// - multiple bootstrap nodes
-// - different subnets / operators
-// - diverse entry points
-//
-// TODO(TRUST):
-// Bootstrap node may later help seed initial trust / admission policy,
-// but it should not be a permanent centralized authority unless intended.
+pub struct BootNode(Multiaddr);
 
 pub enum RpcAction {
     Ping,
@@ -60,7 +48,9 @@ impl Rpc for BootNode {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
-    ) -> Result<Swarm<MyBehaviour>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
+        let state = State::load()?;
+
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()
             .with_tcp(
@@ -135,24 +125,27 @@ impl Rpc for BootNode {
         swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
         swarm.listen_on(self.0)?;
 
-        Ok(swarm)
+        let mut runtime = Runtime::new(swarm, state);
+        runtime.restore_owned_state()?;
+
+        Ok(runtime)
     }
 
     fn match_action(
         args: &mut SplitWhitespace,
-        swarm: &mut Swarm<MyBehaviour>,
+        runtime: &mut Runtime,
         rpc: RpcAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match rpc {
             RpcAction::Ping => {
                 let address = Self::arg_parse(args)?.parse::<Multiaddr>()?;
-                swarm.dial(address)?;
+                runtime.swarm.dial(address)?;
             }
 
             RpcAction::RoutingTable => {
                 info!(
                     "Current state of the routing table: {:?}",
-                    swarm.connected_peers().collect::<Vec<&PeerId>>(),
+                    runtime.swarm.connected_peers().collect::<Vec<&PeerId>>(),
                 );
             }
         }

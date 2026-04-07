@@ -1,18 +1,27 @@
 use crate::{
     behaviour::MyBehaviour,
-    gossip::Topic,
+    gossip::{
+        BlockAnnouncement, LivenessSummary, OverlayMetadata, ReputationSignal,
+        SuspiciousPeerReport, Topic, TransactionAnnouncement,
+    },
     rpc::{LISTEN_ON, Rpc},
+    runtime::Runtime,
+    state::{State, now_unix},
 };
 use async_trait::async_trait;
 use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, Swarm, SwarmBuilder, identify,
+    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
     identity::Keypair,
-    kad::{self, K_VALUE, Mode},
+    kad::{
+        self, Caching, Config, K_VALUE, KBucketKey, Mode, Quorum, Record, RecordKey,
+        store::MemoryStore,
+    },
     noise, ping, tcp, yamux,
 };
 use libp2p_gossipsub::{
     self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
 };
+use serde_json::to_vec;
 use std::{
     collections::hash_map::DefaultHasher,
     error::Error,
@@ -25,12 +34,6 @@ use tracing::info;
 
 pub struct Node {
     pub bootstrap_nodes: Vec<(Multiaddr, PeerId)>,
-    // TODO(TRUST + ECLIPSE + SYBIL):
-    // Later add local policy state here or in a separate manager:
-    // - trusted peers
-    // - quarantined peers
-    // - peer score cache
-    // - admission policy
 }
 
 pub enum RpcAction {
@@ -38,6 +41,8 @@ pub enum RpcAction {
     Store,
     FindNode,
     FindValue,
+    StartProviding,
+    FindProviders,
     RoutingTable,
     ConnectedPeers,
     Transaction,
@@ -64,6 +69,8 @@ impl Rpc for Node {
             "STORE" => Some(RpcAction::Store),
             "FIND_VALUE" => Some(RpcAction::FindValue),
             "FIND_NODE" => Some(RpcAction::FindNode),
+            "START_PROVIDING" => Some(RpcAction::StartProviding),
+            "FIND_PROVIDERS" => Some(RpcAction::FindProviders),
             "ROUTING_TABLE" => Some(RpcAction::RoutingTable),
             "CONNECTED_PEERS" => Some(RpcAction::ConnectedPeers),
             "GOSSIP_TRANSACTION" => Some(RpcAction::Transaction),
@@ -80,7 +87,9 @@ impl Rpc for Node {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
-    ) -> Result<Swarm<MyBehaviour>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
+        let state = State::load()?;
+
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()
             .with_tcp(
@@ -92,8 +101,7 @@ impl Rpc for Node {
             .with_behaviour(|key| {
                 let local_id = key.public().to_peer_id();
 
-                // most can be ommited but are explicit to facilitate tinkering and fine-tuning
-                let mut kad_cfg = kad::Config::new(ipfs_proto_name.clone());
+                let mut kad_cfg = Config::new(ipfs_proto_name.clone());
                 kad_cfg.set_query_timeout(Duration::from_secs(60));
                 kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
                 kad_cfg.set_record_ttl(Some(Duration::from_secs(36 * 60 * 60)));
@@ -103,9 +111,9 @@ impl Rpc for Node {
                 kad_cfg.disjoint_query_paths(true);
                 kad_cfg.set_provider_record_ttl(Some(Duration::from_secs(48 * 60 * 60)));
                 kad_cfg.set_provider_publication_interval(Some(Duration::from_secs(12 * 60 * 60)));
-                kad_cfg.set_caching(kad::Caching::Enabled { max_peers: 1 });
+                kad_cfg.set_caching(Caching::Enabled { max_peers: 1 });
 
-                let store = kad::store::MemoryStore::new(local_id);
+                let store = MemoryStore::new(local_id);
                 let kad = kad::Behaviour::with_config(local_id, store, kad_cfg);
 
                 let ping = ping::Behaviour::new(
@@ -131,13 +139,6 @@ impl Rpc for Node {
                     .message_id_fn(message_id_fn)
                     .build()?;
 
-                // TODO(LEDGER SUPPORT):
-                // Add anti-spam controls to gossip:
-                // - message size bounds
-                // - rate limiting
-                // - per-peer penalty hooks
-                // - custom validation hooks per topic
-
                 let mut gossip = gossipsub::Behaviour::new(
                     MessageAuthenticity::Signed(key.clone()),
                     gossip_config,
@@ -160,11 +161,6 @@ impl Rpc for Node {
             .build();
 
         for (bootstrap_addr, bootstrap_id) in &self.bootstrap_nodes {
-            // TODO(ECLIPSE):
-            // Bootstrap nodes are trusted entry points for now, but long term:
-            // - use multiple bootstrap peers
-            // - prefer disjoint / diverse bootstrap origins
-            // - avoid over-reliance on a single entry path
             swarm
                 .behaviour_mut()
                 .kad
@@ -175,81 +171,91 @@ impl Rpc for Node {
         swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
         swarm.listen_on(LISTEN_ON.parse()?)?;
 
-        Ok(swarm)
+        let mut runtime = Runtime::new(swarm, state);
+        runtime.restore_owned_state()?;
+
+        Ok(runtime)
     }
 
     fn match_action(
         args: &mut SplitWhitespace,
-        swarm: &mut Swarm<MyBehaviour>,
+        runtime: &mut Runtime,
         rpc: RpcAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match rpc {
             RpcAction::Ping => {
                 let address = Self::arg_parse(args)?.parse::<Multiaddr>()?;
-                swarm.dial(address)?;
-
-                // TODO(TRUST):
-                // Prefer dialing known / trusted peers first when there is a choice.
+                runtime.swarm.dial(address)?;
             }
 
             RpcAction::Store => {
-                let key = kad::RecordKey::new(&Self::arg_parse(args)?);
-                let value = Self::arg_parse(args)?.as_bytes().to_vec();
+                let key_text = Self::arg_parse(args)?;
+                let value_text = Self::remaining_args(args)?;
+                let key = RecordKey::new(&key_text);
+                let value = value_text.as_bytes().to_vec();
 
-                let record = kad::Record {
-                    key,
-                    value,
+                let quorum = 3usize;
+
+                let record = Record {
+                    key: key.clone(),
+                    value: value.clone(),
                     publisher: None,
                     expires: None,
                 };
 
-                // TODO(CHURN):
-                // expires: None is too weak for churn handling.
-                // Later:
-                // - set explicit expiration
-                // - track ownership of locally published records
-                // - republish before expiration
-                // - configure replication factor / quorum
+                runtime.swarm.behaviour_mut().kad.put_record(
+                    record,
+                    Quorum::N(NonZeroUsize::new(quorum).ok_or("Quorum must be greater than zero")?),
+                )?;
 
-                swarm
-                    .behaviour_mut()
-                    .kad
-                    .put_record(record, kad::Quorum::N(NonZeroUsize::new(3).unwrap()))?;
-
-                // TODO(TRUST):
-                // Quorum::One is simple but weak.
-                // Later prefer:
-                // - quorum based on replication policy
-                // - trusted peers when selecting storage targets
+                runtime
+                    .state
+                    .persistent
+                    .remember_value_record(key.to_vec(), value, quorum);
+                runtime.state.persistent.save()?;
             }
 
             RpcAction::FindNode => {
                 let peer = Self::arg_parse(args)?.parse::<PeerId>()?;
-                swarm.behaviour_mut().kad.get_closest_peers(peer);
-
-                // TODO(ECLIPSE + BYZANTINE):
-                // Later perform parallel / disjoint lookup paths and compare answers.
+                runtime.swarm.behaviour_mut().kad.get_closest_peers(peer);
             }
 
             RpcAction::FindValue => {
-                let key = kad::RecordKey::new(&Self::arg_parse(args)?);
-                swarm.behaviour_mut().kad.get_record(key);
+                let key = RecordKey::new(&Self::arg_parse(args)?);
+                runtime.swarm.behaviour_mut().kad.get_record(key);
+            }
 
-                // TODO(BYZANTINE):
-                // Later require stronger confidence than "first answer wins".
+            RpcAction::StartProviding => {
+                let key = RecordKey::new(&Self::arg_parse(args)?);
+                runtime
+                    .swarm
+                    .behaviour_mut()
+                    .kad
+                    .start_providing(key.clone())?;
+
+                runtime
+                    .state
+                    .persistent
+                    .remember_provider_record(key.to_vec());
+                runtime.state.persistent.save()?;
+            }
+
+            RpcAction::FindProviders => {
+                let key = RecordKey::new(&Self::arg_parse(args)?);
+                runtime.swarm.behaviour_mut().kad.get_providers(key);
             }
 
             RpcAction::ConnectedPeers => {
                 info!(
-                    "Peers that are currently connected: {:?}",
-                    swarm.connected_peers().collect::<Vec<&PeerId>>(),
+                    "Peers currently connected: {:?}",
+                    runtime.swarm.connected_peers().collect::<Vec<&PeerId>>(),
                 );
             }
 
             RpcAction::RoutingTable => {
-                let local_key = kad::KBucketKey::from(*swarm.local_peer_id());
+                let local_key = KBucketKey::from(*runtime.swarm.local_peer_id());
 
-                for bucket in swarm.behaviour_mut().kad.kbuckets() {
+                for bucket in runtime.swarm.behaviour_mut().kad.kbuckets() {
                     for entry in bucket.iter() {
                         println!(
                             "Peer ID: {:?}, Distance {:?}",
@@ -258,85 +264,95 @@ impl Rpc for Node {
                         );
                     }
                 }
-
-                // TODO(TRUST + ECLIPSE):
-                // Expose richer diagnostics later:
-                // - peer score
-                // - age
-                // - subnet
-                // - suspicion state
-                // - bucket diversity status
             }
 
             RpcAction::Transaction => {
-                let payload = Self::remaining_args(args)?.into_bytes();
-                swarm.behaviour_mut().gossip.publish(
-                    libp2p_gossipsub::IdentTopic::new(Topic::TRANSACTIONS),
-                    payload,
-                )?;
+                let payload = TransactionAnnouncement {
+                    tx_id: "demo-tx".into(),
+                    origin: runtime.swarm.local_peer_id().to_string(),
+                    timestamp_unix: now_unix(),
+                    summary: Self::remaining_args(args)?,
+                };
 
-                // TODO(LEDGER SUPPORT):
-                // Only overlay dissemination now.
-                // Later add:
-                // - spam controls
-                // - schema validation
-                // - content-address indexing hook
+                runtime
+                    .swarm
+                    .behaviour_mut()
+                    .gossip
+                    .publish(IdentTopic::new(Topic::TRANSACTIONS), to_vec(&payload)?)?;
             }
 
             RpcAction::Block => {
-                let payload = Self::arg_parse(args)?.into_bytes();
-                swarm
+                let payload = BlockAnnouncement {
+                    block_id: Self::arg_parse(args)?,
+                    height: 0,
+                    origin: runtime.swarm.local_peer_id().to_string(),
+                    timestamp_unix: now_unix(),
+                };
+
+                runtime
+                    .swarm
                     .behaviour_mut()
                     .gossip
-                    .publish(libp2p_gossipsub::IdentTopic::new(Topic::BLOCKS), payload)?;
-
-                // TODO(LEDGER SUPPORT):
-                // Announcements should point to retrievable block content later.
+                    .publish(IdentTopic::new(Topic::BLOCKS), to_vec(&payload)?)?;
             }
 
             RpcAction::Metadata => {
-                let payload = Self::arg_parse(args)?.into_bytes();
-                swarm.behaviour_mut().gossip.publish(
-                    libp2p_gossipsub::IdentTopic::new(Topic::OVERLAY_META),
-                    payload,
-                )?;
+                let payload = OverlayMetadata {
+                    peer_id: runtime.swarm.local_peer_id().to_string(),
+                    role: Self::arg_parse(args)?,
+                    supported_protocols: vec!["/p2p-auction/1.0.0".into()],
+                    connected_peers: runtime.swarm.connected_peers().count(),
+                };
 
-                // TODO(ANTI-IMPERSONATION):
-                // Publish signed metadata, not plain unsigned JSON.
+                runtime
+                    .swarm
+                    .behaviour_mut()
+                    .gossip
+                    .publish(IdentTopic::new(Topic::OVERLAY_META), to_vec(&payload)?)?;
             }
 
             RpcAction::Reputation => {
-                let payload = Self::arg_parse(args)?.into_bytes();
-                swarm.behaviour_mut().gossip.publish(
-                    libp2p_gossipsub::IdentTopic::new(Topic::PEER_REPUTATION),
-                    payload,
-                )?;
+                let payload = ReputationSignal {
+                    observed_peer: Self::arg_parse(args)?,
+                    score_delta: Self::arg_parse(args)?.parse::<i32>()?,
+                    reason: Self::remaining_args(args)?,
+                    reporter: runtime.swarm.local_peer_id().to_string(),
+                };
 
-                // TODO(TRUST):
-                // Remote reputation reports must be bounded and validated.
+                runtime
+                    .swarm
+                    .behaviour_mut()
+                    .gossip
+                    .publish(IdentTopic::new(Topic::PEER_REPUTATION), to_vec(&payload)?)?;
             }
 
             RpcAction::Suspicious => {
-                let payload = Self::arg_parse(args)?.into_bytes();
-                swarm.behaviour_mut().gossip.publish(
-                    libp2p_gossipsub::IdentTopic::new(Topic::SUSPICIOUS_PEERS),
-                    payload,
-                )?;
+                let payload = SuspiciousPeerReport {
+                    accused_peer: Self::arg_parse(args)?,
+                    reason: Self::remaining_args(args)?,
+                    reporter: runtime.swarm.local_peer_id().to_string(),
+                };
 
-                // TODO(TRUST + BYZANTINE):
-                // Suspicion reports should not directly blacklist peers.
-                // They should feed a local threshold-based suspicion model.
+                runtime
+                    .swarm
+                    .behaviour_mut()
+                    .gossip
+                    .publish(IdentTopic::new(Topic::SUSPICIOUS_PEERS), to_vec(&payload)?)?;
             }
 
             RpcAction::Liveness => {
-                let payload = Self::arg_parse(args)?.into_bytes();
-                swarm
+                let payload = LivenessSummary {
+                    peer_id: runtime.swarm.local_peer_id().to_string(),
+                    status: "alive".into(),
+                    connected_peers: runtime.swarm.connected_peers().count(),
+                    timestamp_unix: now_unix(),
+                };
+
+                runtime
+                    .swarm
                     .behaviour_mut()
                     .gossip
-                    .publish(libp2p_gossipsub::IdentTopic::new(Topic::LIVENESS), payload)?;
-
-                // TODO(CHURN):
-                // Use this as auxiliary liveness information only.
+                    .publish(IdentTopic::new(Topic::LIVENESS), to_vec(&payload)?)?;
             }
         }
 

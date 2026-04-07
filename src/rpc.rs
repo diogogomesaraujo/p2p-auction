@@ -1,28 +1,20 @@
 use async_trait::async_trait;
-use libp2p::{StreamProtocol, Swarm, futures::StreamExt, identity::Keypair};
+use libp2p::{StreamProtocol, futures::StreamExt, identity::Keypair};
 use std::{error::Error, str::SplitWhitespace};
 use tokio::io::{AsyncBufReadExt, BufReader, Stdin};
 
-use crate::behaviour::{MyBehaviour, MyBehaviourEvent};
+use crate::{behaviour::MyBehaviourEvent, runtime::Runtime};
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
-// TODO:
-// Rpc actions currently trigger direct operations only.
-// Later add policy-aware wrappers so actions can:
-// - prefer trusted peers
-// - avoid quarantined peers
-// - trigger retries on alternate paths
-// - enforce lookup/store cross-checking
-
 #[async_trait]
-pub trait Rpc: 'static {
+pub trait Rpc {
     type RpcAction;
 
     fn match_action(
         args: &mut SplitWhitespace,
-        swarm: &mut Swarm<MyBehaviour>,
+        runtime: &mut Runtime,
         rpc: Self::RpcAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
@@ -46,15 +38,14 @@ pub trait Rpc: 'static {
 
     fn execute_action(
         args: &mut SplitWhitespace,
-        swarm: &mut Swarm<MyBehaviour>,
+        runtime: &mut Runtime,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let rpc = match Self::action_from_str(&Self::arg_parse(args)?) {
             Some(rpc) => rpc,
             None => return Err("Couldn't parse any argument".into()),
         };
 
-        Self::match_action(args, swarm, rpc)?;
-
+        Self::match_action(args, runtime, rpc)?;
         Ok(())
     }
 
@@ -62,32 +53,23 @@ pub trait Rpc: 'static {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
-    ) -> Result<Swarm<MyBehaviour>, Box<dyn Error + Send + Sync>>;
+    ) -> Result<Runtime, Box<dyn Error + Send + Sync>>;
 
     async fn run(
-        swarm: &mut Swarm<MyBehaviour>,
+        runtime: &mut Runtime,
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut lines = buffer_reader.lines();
-
-        // TODO(CHURN):
-        // This event loop currently has no periodic maintenance task.
-        // Later add timed maintenance branches for:
-        // - bucket refresh
-        // - republish / refresh of local records
-        // - trust decay
-        // - quarantine expiry / blacklist maintenance
-        // - stale peer cleanup
 
         loop {
             tokio::select! {
                 Ok(Some(line)) = lines.next_line() => {
                     let mut args = line.split_whitespace();
-                    Self::execute_action(&mut args, swarm)?;
+                    Self::execute_action(&mut args, runtime)?;
                 }
 
-                event = swarm.select_next_some() => {
-                    MyBehaviourEvent::from_event(event, swarm)?;
+                event = runtime.swarm.select_next_some() => {
+                    MyBehaviourEvent::from_event(event, &mut runtime.swarm)?;
                 }
             }
         }
