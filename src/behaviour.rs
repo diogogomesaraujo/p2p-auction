@@ -12,10 +12,7 @@ use libp2p_gossipsub::{self as gossipsub};
 
 use crate::{
     config::Config,
-    gossip::{
-        BlockAnnouncement, LivenessSummary, OverlayMetadata, ReputationSignal,
-        SuspiciousPeerReport, Topic, TransactionAnnouncement,
-    },
+    gossip::{OverlayMetadata, Topic},
     runtime::Runtime,
     state::now_unix,
 };
@@ -259,8 +256,6 @@ impl MyBehaviourEvent {
                         kad::QueryResult::RepublishRecord(Err(err)) => {
                             error!("RepublishRecord failed: {:?}", err);
                         }
-
-                        _ => {}
                     }
 
                     let now = now_unix();
@@ -328,38 +323,9 @@ impl MyBehaviourEvent {
                 );
 
                 match topic {
-                    Topic::TRANSACTIONS => {
-                        match from_slice::<TransactionAnnouncement>(&message.data) {
-                            Ok(msg) => info!("Transaction announcement: {:?}", msg),
-                            Err(e) => error!("Invalid transaction payload: {e}"),
-                        }
-                    }
-
-                    Topic::BLOCKS => match from_slice::<BlockAnnouncement>(&message.data) {
-                        Ok(msg) => info!("Block announcement: {:?}", msg),
-                        Err(e) => error!("Invalid block payload: {e}"),
-                    },
-
                     Topic::OVERLAY_META => match from_slice::<OverlayMetadata>(&message.data) {
                         Ok(msg) => info!("Overlay metadata: {:?}", msg),
                         Err(e) => error!("Invalid overlay metadata payload: {e}"),
-                    },
-
-                    Topic::PEER_REPUTATION => match from_slice::<ReputationSignal>(&message.data) {
-                        Ok(msg) => info!("Peer reputation signal: {:?}", msg),
-                        Err(e) => error!("Invalid reputation payload: {e}"),
-                    },
-
-                    Topic::SUSPICIOUS_PEERS => {
-                        match from_slice::<SuspiciousPeerReport>(&message.data) {
-                            Ok(msg) => info!("Suspicious peer report: {:?}", msg),
-                            Err(e) => error!("Invalid suspicious-peer payload: {e}"),
-                        }
-                    }
-
-                    Topic::LIVENESS => match from_slice::<LivenessSummary>(&message.data) {
-                        Ok(msg) => info!("Liveness summary: {:?}", msg),
-                        Err(e) => error!("Invalid liveness payload: {e}"),
                     },
 
                     _ => {

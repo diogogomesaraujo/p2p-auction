@@ -1,12 +1,9 @@
 use crate::{
     behaviour::MyBehaviour,
-    gossip::{
-        BlockAnnouncement, LivenessSummary, OverlayMetadata, ReputationSignal,
-        SuspiciousPeerReport, Topic, TransactionAnnouncement,
-    },
+    gossip::{OverlayMetadata, Topic},
     rpc::{LISTEN_ON, Rpc},
     runtime::Runtime,
-    state::{State, now_unix},
+    state::State,
 };
 use async_trait::async_trait;
 use libp2p::{
