@@ -1,3 +1,4 @@
+use crate::{behaviour::MyBehaviour, gossip::Topic, rpc::Rpc, runtime::Runtime, state::State};
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
@@ -17,8 +18,8 @@ use std::{
 };
 use tracing::info;
 
-use crate::{behaviour::MyBehaviour, gossip::Topic, rpc::Rpc, runtime::Runtime, state::State};
-
+/// Struct that represents a boot node of the network.
+/// Boot nodes serve as entry points and keep track of peers currently using the network.
 pub struct BootNode(Multiaddr);
 
 pub enum RpcAction {
@@ -27,6 +28,7 @@ pub enum RpcAction {
 }
 
 impl BootNode {
+    /// Function that creates a new boot node from a predetermined address.
     pub fn new(address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self(address.parse::<Multiaddr>()?))
     }
