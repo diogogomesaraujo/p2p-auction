@@ -1,10 +1,21 @@
-use crate::CONFIG_DIR;
 use libp2p::identity::Keypair;
 use std::{
     error::Error,
     fs::File,
     io::{Read, Write},
 };
+
+pub fn get_key(path: &str) -> Result<Keypair, Box<dyn Error + Send + Sync>> {
+    match key_from_file(path) {
+        Ok(key) => Ok(key),
+        Err(_) => {
+            let key = Keypair::generate_ed25519();
+
+            key_to_file(&key, path)?;
+            Ok(key)
+        }
+    }
+}
 
 pub fn key_from_file(path: &str) -> Result<Keypair, Box<dyn Error + Send + Sync>> {
     let mut file = File::open(path)?;
@@ -17,8 +28,7 @@ pub fn key_from_file(path: &str) -> Result<Keypair, Box<dyn Error + Send + Sync>
     Ok(Keypair::from_protobuf_encoding(&mut key)?)
 }
 
-pub fn key_to_file(key: &Keypair) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let path = format!("{CONFIG_DIR}/{}", key.public().to_peer_id().to_base58());
+pub fn key_to_file(key: &Keypair, path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut file = File::create(path)?;
 
     let key_hex = hex::encode(key.to_protobuf_encoding()?);
@@ -40,7 +50,7 @@ pub mod test {
         let key = Keypair::generate_ed25519();
         let test_filepath = "test";
 
-        key_to_file(&key)?;
+        key_to_file(&key, test_filepath)?;
 
         assert_eq!(
             key.to_protobuf_encoding()?,
