@@ -194,7 +194,8 @@ impl Rpc for Node {
                 let key = RecordKey::new(&key_text);
                 let value = value_text.as_bytes().to_vec();
 
-                let quorum = 3usize;
+                // let quorum = 3usize;
+                let quorum = 1usize; // for now we are using low quorum for testing
 
                 let record = Record {
                     key: key.clone(),

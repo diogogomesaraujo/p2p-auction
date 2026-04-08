@@ -17,7 +17,7 @@ impl Runtime {
     }
 
     pub fn restore_owned_state(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        for rec in &self.state.persistent.owned_value_records {
+        for rec in &self.state.persistent.persistent_value_records {
             let record = Record {
                 key: RecordKey::new(&rec.key),
                 value: rec.value.clone(),
@@ -34,7 +34,7 @@ impl Runtime {
             )?;
         }
 
-        for rec in &self.state.persistent.owned_provider_records {
+        for rec in &self.state.persistent.persistent_provider_records {
             self.swarm
                 .behaviour_mut()
                 .kad

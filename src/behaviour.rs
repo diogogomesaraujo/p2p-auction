@@ -250,7 +250,7 @@ impl MyBehaviourEvent {
                             info!("Successfully stored the value at {:?}", ok.key);
                         }
                         kad::QueryResult::PutRecord(Err(err)) => {
-                            error!("Failed to store the value requested at {:?}.", err.key());
+                            error!("PutRecord failed: {:?}", err);
                         }
 
                         kad::QueryResult::RepublishRecord(Ok(ok)) => {
