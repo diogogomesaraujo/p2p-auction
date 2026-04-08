@@ -8,16 +8,20 @@ use crate::{behaviour::MyBehaviourEvent, runtime::Runtime};
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
+/// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
 pub trait Rpc {
+    /// Enum type that contains the different RPC calls an external node can make to the current one.
     type RpcAction;
 
+    /// Function that executes an action according to the RPC call.
     fn match_action(
         args: &mut SplitWhitespace,
         runtime: &mut Runtime,
         rpc: Self::RpcAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
+    /// Function that
     fn action_from_str(action_text: &str) -> Option<Self::RpcAction>;
 
     fn arg_parse(args: &mut SplitWhitespace) -> Result<String, Box<dyn Error + Send + Sync>> {

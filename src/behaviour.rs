@@ -11,7 +11,6 @@ use tracing::{error, info};
 use libp2p_gossipsub::{self as gossipsub};
 
 use crate::{
-    config::Config,
     gossip::{
         BlockAnnouncement, LivenessSummary, OverlayMetadata, ReputationSignal,
         SuspiciousPeerReport, Topic, TransactionAnnouncement,
@@ -68,10 +67,7 @@ impl MyBehaviourEvent {
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
-                let config = Config::from(address, *runtime.swarm.local_peer_id());
-                config.to_file()?;
-
-                info!("Listening on {:?}.", config.address);
+                info!("Listening on {:?}.", address);
             }
 
             SwarmEvent::ConnectionEstablished {
@@ -259,8 +255,6 @@ impl MyBehaviourEvent {
                         kad::QueryResult::RepublishRecord(Err(err)) => {
                             error!("RepublishRecord failed: {:?}", err);
                         }
-
-                        _ => {}
                     }
 
                     let now = now_unix();
