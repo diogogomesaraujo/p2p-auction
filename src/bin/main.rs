@@ -10,8 +10,8 @@ use tokio::{
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/p2p-auction/1.0.0");
 
 const BOOT_NODES: [(&str, &str); 1] = [(
-    "/ip4/127.0.0.1/tcp/63358",
-    "12D3KooWDAg4BkMBDpzjJtNe5x8eptLKRtCM28KtBFJnkeLnCQ6n",
+    "/ip4/172.20.0.2/tcp/63358",
+    "12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt",
 )];
 
 #[derive(Parser, Debug)]

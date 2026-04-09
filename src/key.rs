@@ -23,9 +23,9 @@ pub fn key_from_file(path: &str) -> Result<Keypair, Box<dyn Error + Send + Sync>
     let mut buf = String::new();
     file.read_to_string(&mut buf)?;
 
-    let mut key = hex::decode(buf)?;
+    let key = hex::decode(buf)?;
 
-    Ok(Keypair::from_protobuf_encoding(&mut key)?)
+    Ok(Keypair::from_protobuf_encoding(&key)?)
 }
 
 pub fn key_to_file(key: &Keypair, path: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
