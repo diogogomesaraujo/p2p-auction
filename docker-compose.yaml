@@ -8,7 +8,7 @@ services:
       - ARGS=--key-path config/boot1 --port 63358
     networks:
       - p2p-net
-  node:
+  node_1:
     image: p2p-auction
     depends_on:
       boot:
@@ -17,6 +17,28 @@ services:
     environment:
       - MODE=main
       - ARGS=--key-path config/node1
+    networks:
+      - p2p-net
+  node_2:
+    image: p2p-auction
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
+    environment:
+      - MODE=main
+      - ARGS=--key-path config/node2
+    networks:
+      - p2p-net
+  node_3:
+    image: p2p-auction
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
+    environment:
+      - MODE=main
+      - ARGS=--key-path config/node3
     networks:
       - p2p-net
 

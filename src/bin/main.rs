@@ -1,11 +1,8 @@
 use clap::Parser;
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use p2p_auction::{key::get_key, node::Node, rpc::Rpc};
-use std::{error::Error, time::Duration};
-use tokio::{
-    io::{BufReader, stdin},
-    time::sleep,
-};
+use std::error::Error;
+use tokio::io::{BufReader, stdin};
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/p2p-auction/1.0.0");
 
@@ -38,8 +35,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let args = Args::parse();
 
     tracing_subscriber::fmt().try_init()?;
-
-    sleep(Duration::from_secs(2)).await;
 
     let self_key = get_key(&args.key_path)?;
 
