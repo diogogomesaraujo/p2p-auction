@@ -1,6 +1,6 @@
 use crate::{
     behaviour::DhtBehaviour,
-    gossip::{OverlayMetadata, topic},
+    gossip::{Metadata, topic},
     rpc::{LISTEN_ON, Rpc},
     runtime::Runtime,
     state::State,
@@ -252,7 +252,7 @@ impl Rpc for Node {
             }
 
             RpcAction::Metadata => {
-                let payload = OverlayMetadata {
+                let payload = Metadata {
                     peer_id: runtime.swarm.local_peer_id().to_string(),
                     role: Self::arg_parse(args)?,
                     supported_protocols: vec!["/p2p-auction/1.0.0".into()],

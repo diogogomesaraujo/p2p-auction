@@ -10,7 +10,7 @@ pub mod topic {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OverlayMetadata {
+pub struct Metadata {
     pub peer_id: String,
     pub role: String,
     pub supported_protocols: Vec<String>,

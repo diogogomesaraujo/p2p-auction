@@ -1,5 +1,5 @@
 use crate::{
-    gossip::{OverlayMetadata, topic},
+    gossip::{Metadata, topic},
     runtime::Runtime,
     state::now_unix,
 };
@@ -320,7 +320,7 @@ impl DhtBehaviourEvent {
                 );
 
                 match t {
-                    topic::OVERLAY_META => match from_slice::<OverlayMetadata>(&message.data) {
+                    topic::OVERLAY_META => match from_slice::<Metadata>(&message.data) {
                         Ok(msg) => info!("Overlay metadata: {:?}", msg),
                         Err(e) => error!("Invalid overlay metadata payload: {e}"),
                     },
