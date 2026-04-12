@@ -1,10 +1,9 @@
+use crate::{behaviour::DhtBehaviour, state::State};
 use libp2p::{
     Swarm,
     kad::{Quorum, Record, RecordKey},
 };
 use std::{error::Error, num::NonZeroUsize};
-
-use crate::{behaviour::DhtBehaviour, state::State};
 
 pub struct Runtime {
     pub swarm: Swarm<DhtBehaviour>,

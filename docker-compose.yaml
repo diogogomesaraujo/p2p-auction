@@ -1,53 +1,57 @@
 version: "3"
 
 services:
-    boot:
-        image: p2p-auction
-        environment:
-            - MODE=boot
-            - ARGS=--key-path config/boot1 --port 63358
-        networks:
-            p2p-net:
-                ipv4_address: 10.0.0.2
+  boot:
+    image: p2p-auction
+    environment:
+      - MODE=boot
+      - ARGS=--key-path config/boot1 --port 63358
+    networks:
+      p2p-net:
+        ipv4_address: 10.0.0.2
+    ports:
+      - "63358:63358"
 
-    node_1:
-        image: p2p-auction
-        depends_on:
-            boot:
-                condition: service_started
-                restart: true
-        environment:
-            - MODE=main
-            - ARGS=--key-path config/node1
-        networks:
-            - p2p-net
-    node_2:
-        image: p2p-auction
-        depends_on:
-            boot:
-                condition: service_started
-                restart: true
-        environment:
-            - MODE=main
-            - ARGS=--key-path config/node2
-        networks:
-            - p2p-net
-    node_3:
-        image: p2p-auction
-        depends_on:
-            boot:
-                condition: service_started
-                restart: true
-        environment:
-            - MODE=main
-            - ARGS=--key-path config/node3
-        networks:
-            - p2p-net
+  node_1:
+    image: p2p-auction
+    stdin_open: true
+    tty: true
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
+    environment:
+      - MODE=main
+      - ARGS=--key-path config/node1 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt
+    networks:
+      - p2p-net
+  node_2:
+    image: p2p-auction
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
+    environment:
+      - MODE=main
+      - ARGS=--key-path config/node2 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt
+    networks:
+      - p2p-net
+  node_3:
+    image: p2p-auction
+    depends_on:
+      boot:
+        condition: service_started
+        restart: true
+    environment:
+      - MODE=main
+      - ARGS=--key-path config/node3 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt
+    networks:
+      - p2p-net
 
 networks:
-    p2p-net:
-        driver: bridge
-        ipam:
-            config:
-                - subnet: 10.0.0.0/24
-                  gateway: 10.0.0.1
+  p2p-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.0.0.0/24
+          gateway: 10.0.0.1

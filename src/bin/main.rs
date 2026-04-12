@@ -6,7 +6,7 @@ use tokio::io::{BufReader, stdin};
 
 const IPFS_PROTO_NAME: StreamProtocol = StreamProtocol::new("/p2p-auction/1.0.0");
 
-const BOOT_NODES: [(&str, &str); 1] = [(
+const _BOOT_NODES: [(&str, &str); 1] = [(
     "/ip4/10.0.0.2/tcp/63358",
     "12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt",
 )];
@@ -19,6 +19,12 @@ struct Args {
 
     #[arg(long)]
     state_path: Option<String>,
+
+    #[arg(long)]
+    boot_path: String,
+
+    #[arg(long)]
+    boot_key: String,
 }
 
 fn boot_nodes_from_str(
@@ -38,7 +44,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let self_key = get_key(&args.key_path)?;
 
-    let node = Node::new(boot_nodes_from_str(&BOOT_NODES)?);
+    let node = Node::new(boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?);
 
     let mut i = node.init(IPFS_PROTO_NAME, self_key).await?;
     Node::run(&mut i, BufReader::new(stdin())).await?;
