@@ -77,7 +77,7 @@ impl Local {
         }
 
         let bytes = to_vec_pretty(self)?;
-        write(STATE_FILE, bytes);
+        write(STATE_FILE, bytes)?;
         Ok(())
     }
 

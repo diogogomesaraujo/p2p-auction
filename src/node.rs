@@ -199,7 +199,7 @@ impl Rpc for Node {
                 runtime
                     .state
                     .local
-                    .remember_value_record(key.to_vec(), value, quorum);
+                    .remember_value_record(key.to_vec(), value, quorum)?;
                 runtime.state.local.save()?;
             }
 
@@ -221,7 +221,7 @@ impl Rpc for Node {
                     .kad
                     .start_providing(key.clone())?;
 
-                runtime.state.local.remember_provider_record(key.to_vec());
+                runtime.state.local.remember_provider_record(key.to_vec())?;
                 runtime.state.local.save()?;
             }
 

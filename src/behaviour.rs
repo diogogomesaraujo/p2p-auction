@@ -1,7 +1,7 @@
 use crate::{
     gossip::{Metadata, topic},
     runtime::Runtime,
-    state::now_unix,
+    time::now_unix,
 };
 use libp2p::{
     identify,
@@ -71,7 +71,7 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                let now = now_unix();
+                let now = now_unix()?;
 
                 let entry = runtime.state.peers.entry(peer_id).or_default();
                 if entry.first_seen.is_none() {
@@ -104,7 +104,7 @@ impl DhtBehaviourEvent {
                          addresses={addresses:?} bucket_range={bucket_range:?} old_peer={old_peer:?}"
                     );
 
-                    let now = now_unix();
+                    let now = now_unix()?;
                     let entry = runtime.state.peers.entry(peer).or_default();
                     if entry.first_seen.is_none() {
                         entry.first_seen = Some(now);
@@ -123,7 +123,7 @@ impl DhtBehaviourEvent {
                 kad::Event::UnroutablePeer { peer } => {
                     info!("UnroutablePeer peer={peer:?}");
 
-                    let now = now_unix();
+                    let now = now_unix()?;
                     let entry = runtime.state.peers.entry(peer).or_default();
                     if entry.first_seen.is_none() {
                         entry.first_seen = Some(now);
@@ -136,7 +136,7 @@ impl DhtBehaviourEvent {
                 kad::Event::RoutablePeer { peer, address } => {
                     info!("RoutablePeer peer={peer:?} address={address:?}");
 
-                    let now = now_unix();
+                    let now = now_unix()?;
                     let entry = runtime.state.peers.entry(peer).or_default();
                     if entry.first_seen.is_none() {
                         entry.first_seen = Some(now);
@@ -154,7 +154,7 @@ impl DhtBehaviourEvent {
                 kad::Event::PendingRoutablePeer { peer, address } => {
                     info!("PendingRoutablePeer peer={peer:?} address={address:?}");
 
-                    let now = now_unix();
+                    let now = now_unix()?;
                     let entry = runtime.state.peers.entry(peer).or_default();
                     if entry.first_seen.is_none() {
                         entry.first_seen = Some(now);
@@ -255,7 +255,7 @@ impl DhtBehaviourEvent {
                         }
                     }
 
-                    let now = now_unix();
+                    let now = now_unix()?;
                     for peer in runtime.state.peers.values_mut() {
                         peer.last_successful_kad_response = Some(now);
                     }
@@ -268,7 +268,7 @@ impl DhtBehaviourEvent {
                     event.connection, event.peer, event.result
                 );
 
-                let now = now_unix();
+                let now = now_unix()?;
                 let entry = runtime.state.peers.entry(event.peer).or_default();
                 if entry.first_seen.is_none() {
                     entry.first_seen = Some(now);
@@ -290,7 +290,7 @@ impl DhtBehaviourEvent {
 
             SwarmEvent::Behaviour(DhtBehaviourEvent::Identify(event)) => {
                 if let identify::Event::Received { peer_id, info, .. } = *event {
-                    let now = now_unix();
+                    let now = now_unix()?;
                     let entry = runtime.state.peers.entry(peer_id).or_default();
                     if entry.first_seen.is_none() {
                         entry.first_seen = Some(now);
