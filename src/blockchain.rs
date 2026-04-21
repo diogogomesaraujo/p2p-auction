@@ -149,20 +149,13 @@ pub mod test {
     use crate::blockchain::Blockchain;
 
     #[test]
-    fn test_blockchain_nonces() -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn test_blockchain() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut blockchain = Blockchain::new(u32::MAX)?;
 
         for n in 0..2 {
             blockchain.add_block(&format!("{n}"))?;
         }
-        println!(
-            "{:?}",
-            blockchain
-                .blocks
-                .into_iter()
-                .map(|b| b.nonce)
-                .collect::<Vec<u32>>()
-        );
+        println!("{:?}", blockchain);
 
         Ok(())
     }
