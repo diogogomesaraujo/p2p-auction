@@ -126,7 +126,7 @@ pub mod account {
     }
 }
 
-trait WorldState {
+trait State {
     /// Will bring us all registered user ids
     fn get_user_ids(&self) -> Vec<String>;
 
