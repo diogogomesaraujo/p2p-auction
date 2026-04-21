@@ -6,7 +6,6 @@ use std::{
     collections::HashMap,
     error::Error,
     fs::{create_dir_all, read, write},
-    io::{self},
     path::Path,
 };
 
@@ -54,7 +53,7 @@ pub struct ProviderRecord {
 }
 
 impl State {
-    pub fn init() -> Result<Self> {
+    pub fn init() -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             local: Local::load()?,
             peers: HashMap::new(),
@@ -72,13 +71,14 @@ impl Local {
         Ok(from_slice(&bytes)?)
     }
 
-    pub fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if let Some(parent) = Path::new(STATE_FILE).parent() {
             create_dir_all(parent)?;
         }
 
-        let bytes = to_vec_pretty(self).map_err(|e| Error::new(io::ErrorKind::InvalidData, e))?;
-        write(STATE_FILE, bytes)
+        let bytes = to_vec_pretty(self)?;
+        write(STATE_FILE, bytes);
+        Ok(())
     }
 
     pub fn remember_value_record(
@@ -106,5 +106,6 @@ impl Local {
             key,
             announced_at: now_unix()?,
         });
+        Ok(())
     }
 }
