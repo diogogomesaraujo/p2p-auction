@@ -1,6 +1,10 @@
 use blake2::Blake2b512;
 use std::error::Error;
 
+// https://towardsdev.com/the-proof-of-work-pow-mechanism-in-blockchain-6a49196cab75
+// https://www.jmeiners.com/tiny-blockchain/
+// https://en.bitcoin.it/wiki/Protocol_documentation#Block_Headers
+
 pub mod hash {
     use blake2::{Blake2b512, Digest};
 
