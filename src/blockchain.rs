@@ -89,7 +89,7 @@ pub mod pow {
                 }
 
                 let unsigned_block =
-                    UnsignedBlock::new(previous_hash, pow.transactions.clone(), nonce, timestamp);
+                    UnsignedBlock::new(previous_hash, &pow.transactions, nonce, timestamp);
 
                 let h = unsigned_block.hash()?;
 
@@ -196,13 +196,13 @@ pub struct UnsignedBlock {
 impl UnsignedBlock {
     pub fn new(
         previous_hash: &str,
-        transactions: Vec<Transaction>,
+        transactions: &[Transaction],
         nonce: u32,
         timestamp: u64,
     ) -> Self {
         Self {
             previous_hash: previous_hash.to_string(),
-            transactions,
+            transactions: transactions.to_vec(),
             nonce,
             timestamp,
         }
@@ -258,7 +258,7 @@ impl Block {
     pub fn verify(&self) -> bool {
         let unsigned_block = UnsignedBlock::new(
             &self.previous_hash,
-            self.transactions.clone(),
+            &self.transactions,
             self.nonce,
             self.timestamp,
         );
@@ -330,7 +330,7 @@ mod test {
             blockchain.add_block(transactions)?;
         }
 
-        blockchain.verify(); // optimize
+        blockchain.verify();
 
         Ok(())
     }
