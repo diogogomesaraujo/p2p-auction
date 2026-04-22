@@ -6,9 +6,8 @@
 //! - [Simple PoW Implementation in Rust](https://hackernoon.com/rusty-chains-a-basic-blockchain-implementation-written-in-pure-rust-gk2m3uri)
 //! - [Bitcoin Protocol Specification](https://en.bitcoin.it/wiki/Protocol_documentation#Block_Headers)
 
-use crate::blockchain::{account::Account, hash::encode_hash, transaction::Transaction};
-use blake2::{Blake2b512, Digest};
-use serde::{Deserialize, Serialize};
+use crate::blockchain::{account::Account, block::Block, transaction::Transaction};
+use blake2::Blake2b512;
 use std::error::Error;
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
@@ -53,7 +52,7 @@ pub mod hash {
 
 pub mod pow {
     use crate::{
-        blockchain::{UnsignedBlock, transaction::Transaction},
+        blockchain::{block::UnsignedBlock, transaction::Transaction},
         time::now_unix,
     };
     use std::error::Error;
@@ -102,7 +101,7 @@ pub mod pow {
 }
 
 pub mod transaction {
-    use crate::time::now_unix;
+    use crate::{blockchain::State, time::now_unix};
     use serde::{Deserialize, Serialize};
     use std::error::Error;
 
@@ -139,6 +138,14 @@ pub mod transaction {
                 signature,
             })
         }
+
+        pub fn execute<T: State>(
+            &self,
+            _state: &mut T,
+        ) -> Result<(), Box<dyn Error + Send + Sync>> {
+            // TODO
+            Ok(())
+        }
     }
 }
 
@@ -172,6 +179,103 @@ pub mod account {
     }
 }
 
+pub mod block {
+    use std::error::Error;
+
+    use blake2::Digest;
+    use serde::{Deserialize, Serialize};
+
+    use crate::blockchain::{
+        HashFunction,
+        hash::{self, encode_hash},
+        pow,
+        transaction::Transaction,
+    };
+
+    pub struct UnsignedBlock {
+        pub previous_hash: String,
+        pub transactions: Vec<Transaction>,
+        pub nonce: u32,
+        pub timestamp: u64,
+    }
+
+    impl UnsignedBlock {
+        pub fn new(
+            previous_hash: &str,
+            transactions: &[Transaction],
+            nonce: u32,
+            timestamp: u64,
+        ) -> Self {
+            Self {
+                previous_hash: previous_hash.to_string(),
+                transactions: transactions.to_vec(),
+                nonce,
+                timestamp,
+            }
+        }
+
+        pub fn hash(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+            let input = format!(
+                "{}:{}:{}:{}",
+                self.previous_hash,
+                serde_json::to_string(&self.transactions)?,
+                self.nonce,
+                self.timestamp
+            );
+            Ok(hash::hash(HashFunction::new(), &input))
+        }
+    }
+
+    /// Struct that defines a published block.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Block {
+        pub previous_hash: String,
+        pub transactions: Vec<Transaction>,
+        pub hash: String,
+        pub nonce: u32,
+        pub timestamp: u64,
+    }
+
+    impl Block {
+        /// Function that creates a new block for a given set of transactions after mining the correct nonce.
+        pub fn new(
+            previous_hash: Option<String>,
+            transactions: Vec<Transaction>,
+            difficulty: u32,
+        ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+            let previous_hash = match previous_hash {
+                Some(ph) => ph,
+                None => "0".to_string(),
+            };
+            let p = pow::ProofOfWork {
+                transactions,
+                difficulty,
+            };
+            let (h, nonce, timestamp) = pow::mine(&p, &previous_hash)?;
+            Ok(Block {
+                previous_hash,
+                transactions: p.transactions,
+                hash: h,
+                timestamp,
+                nonce,
+            })
+        }
+
+        pub fn verify(&self) -> bool {
+            let unsigned_block = UnsignedBlock::new(
+                &self.previous_hash,
+                &self.transactions,
+                self.nonce,
+                self.timestamp,
+            );
+            match unsigned_block.hash() {
+                Ok(h) => encode_hash(&h) == self.hash,
+                Err(_) => false,
+            }
+        }
+    }
+}
+
 pub trait State {
     /// Will bring us all registered user ids
     fn get_user_ids(&self) -> Vec<String>;
@@ -184,89 +288,6 @@ pub trait State {
 
     /// Will add a new account
     fn create_account(&mut self, id: String, kind: account::Kind) -> Result<(), &str>;
-}
-
-pub struct UnsignedBlock {
-    pub previous_hash: String,
-    pub transactions: Vec<Transaction>,
-    pub nonce: u32,
-    pub timestamp: u64,
-}
-
-impl UnsignedBlock {
-    pub fn new(
-        previous_hash: &str,
-        transactions: &[Transaction],
-        nonce: u32,
-        timestamp: u64,
-    ) -> Self {
-        Self {
-            previous_hash: previous_hash.to_string(),
-            transactions: transactions.to_vec(),
-            nonce,
-            timestamp,
-        }
-    }
-
-    pub fn hash(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
-        let input = format!(
-            "{}:{}:{}:{}",
-            self.previous_hash,
-            serde_json::to_string(&self.transactions)?,
-            self.nonce,
-            self.timestamp
-        );
-        Ok(hash::hash(HashFunction::new(), &input))
-    }
-}
-
-/// Struct that defines a published block.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Block {
-    pub previous_hash: String,
-    pub transactions: Vec<Transaction>,
-    pub hash: String,
-    pub nonce: u32,
-    pub timestamp: u64,
-}
-
-impl Block {
-    /// Function that creates a new block for a given set of transactions after mining the correct nonce.
-    pub fn new(
-        previous_hash: Option<String>,
-        transactions: Vec<Transaction>,
-        difficulty: u32,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        let previous_hash = match previous_hash {
-            Some(ph) => ph,
-            None => "0".to_string(),
-        };
-        let p = pow::ProofOfWork {
-            transactions,
-            difficulty,
-        };
-        let (h, nonce, timestamp) = pow::mine(&p, &previous_hash)?;
-        Ok(Block {
-            previous_hash,
-            transactions: p.transactions,
-            hash: h,
-            timestamp,
-            nonce,
-        })
-    }
-
-    pub fn verify(&self) -> bool {
-        let unsigned_block = UnsignedBlock::new(
-            &self.previous_hash,
-            &self.transactions,
-            self.nonce,
-            self.timestamp,
-        );
-        match unsigned_block.hash() {
-            Ok(h) => encode_hash(&h) == self.hash,
-            Err(_) => false,
-        }
-    }
 }
 
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
@@ -290,20 +311,57 @@ impl Blockchain {
         &mut self,
         transactions: Vec<Transaction>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if transactions.len() == 0 {
+            return Err(
+                "There needs to be at least one transaction for a block to be generated.".into(),
+            );
+        }
+
         let previous_block_hash = match self.blocks.last() {
             Some(pb) => Some(pb.hash.clone()),
             None => None,
         };
-        self.blocks.push(Block::new(
-            previous_block_hash,
-            transactions,
-            self.difficulty,
-        )?);
+        let block_to_append = Block::new(previous_block_hash, transactions, self.difficulty)?;
+
+        if !block_to_append.verify() {
+            return Err("Failed to produce a valid block.".into());
+        }
+
+        if block_to_append.previous_hash != self.blocks[self.blocks.len() - 1].hash {
+            return Err("The new block does not point to the previous block in the chain.".into());
+        }
+
+        block_to_append.transactions.iter().try_for_each(
+            |t| -> Result<(), Box<dyn Error + Send + Sync>> {
+                t.execute(self)?;
+                Ok(())
+            },
+        )?;
+
+        self.blocks.push(block_to_append);
         Ok(())
     }
 
     pub fn verify(&self) -> bool {
         self.blocks.iter().fold(false, |acc, b| acc && b.verify())
+    }
+}
+
+impl State for Blockchain {
+    fn create_account(&mut self, _id: String, _kind: account::Kind) -> Result<(), &str> {
+        todo!()
+    }
+
+    fn get_account_by_id(&self, _id: &String) -> Option<&Account> {
+        todo!()
+    }
+
+    fn get_account_by_id_mut(&mut self, _id: &String) -> Option<&mut Account> {
+        todo!()
+    }
+
+    fn get_user_ids(&self) -> Vec<String> {
+        todo!()
     }
 }
 

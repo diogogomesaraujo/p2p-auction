@@ -42,11 +42,9 @@ pub fn key_to_file(key: &Keypair, path: &str) -> Result<(), Box<dyn Error + Send
 
 #[cfg(test)]
 pub mod test {
-    use std::error::Error;
-
-    use libp2p::identity::Keypair;
-
     use crate::key::{key_from_file, key_to_file};
+    use libp2p::identity::Keypair;
+    use std::error::Error;
 
     #[test]
     fn test_key_conversion() -> Result<(), Box<dyn Error + Send + Sync>> {
