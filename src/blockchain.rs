@@ -1,6 +1,8 @@
 use blake2::Blake2b512;
 use std::error::Error;
 
+use crate::blockchain::{account::Account, transaction::Transaction};
+
 type HashFunction = Blake2b512;
 
 // https://towardsdev.com/the-proof-of-work-pow-mechanism-in-blockchain-6a49196cab75
@@ -42,7 +44,7 @@ pub mod hash {
 
 pub mod pow {
     use crate::{
-        blockchain::{HashFunction, hash},
+        blockchain::{HashFunction, hash, transaction::Transaction},
         time::now_unix,
     };
     use blake2::Digest;
@@ -56,7 +58,7 @@ pub mod pow {
     ];
 
     pub struct ProofOfWork {
-        pub data: String,
+        pub transactions: Vec<Transaction>,
         pub difficulty: u32,
     }
 
@@ -72,7 +74,10 @@ pub mod pow {
                     info!("Still mining. The current nonce value is: {}.", nonce);
                 }
 
-                let input = format!("{}:{}:{}:{}", previous_hash, pow.data, nonce, timestamp);
+                let input = format!(
+                    "{}:{:?}:{}:{}",
+                    previous_hash, pow.transactions, nonce, timestamp
+                );
                 let h = hash::hash(HashFunction::new(), &input);
 
                 if h.as_slice() < TARGET {
@@ -83,10 +88,95 @@ pub mod pow {
     }
 }
 
+pub mod transaction {
+    use std::time::SystemTime;
+
+    #[derive(Clone, Debug)]
+    pub struct Transaction {
+        pub record: Data,
+        from: String,
+        created_at: SystemTime,
+        nonce: u128,
+        signature: Option<String>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum Data {
+        CreateUserAccount(String),
+        ChangeStoreValue { key: String, value: String },
+        TransferTokens { to: String, amount: u128 },
+        CreateTokens { receiver: String, amount: u128 },
+        // add more and adapt for auction
+    }
+
+    impl Transaction {
+        pub fn new(record: Data, from: String, nonce: u128) -> Self {
+            Self {
+                record,
+                from,
+                created_at: SystemTime::now(),
+                nonce,
+                signature: None,
+            }
+        }
+    }
+}
+
+pub mod account {
+    use std::{collections::HashMap, error::Error};
+
+    #[derive(Clone, Debug)]
+    pub struct Account {
+        store: HashMap<String, String>,
+        kind: Kind,
+        /// Amount of tokens that account owns (like BTC or ETH) -> might not need
+        tokens: u128,
+    }
+
+    #[derive(Clone, Debug)]
+    pub enum Kind {
+        User,
+
+        // like smart contract in etherium -> might not need
+        Contract,
+
+        /// whatever roles we will need
+        Validator {
+            correctly_validated_blocks: u128,
+            incorrectly_validated_blocks: u128,
+            you_get_the_idea: bool,
+        },
+    }
+
+    impl Account {
+        pub fn new(kind: Kind) -> Result<Self, Box<dyn Error + Send + Sync>> {
+            Ok(Self {
+                store: HashMap::new(),
+                kind,
+                tokens: 0,
+            })
+        }
+    }
+}
+
+trait State {
+    /// Will bring us all registered user ids
+    fn get_user_ids(&self) -> Vec<String>;
+
+    /// Will return a account given it's id if is available (mutable)
+    fn get_account_by_id_mut(&mut self, id: &String) -> Option<&mut Account>;
+
+    /// Will return a account given it's id if is available
+    fn get_account_by_id(&self, id: &String) -> Option<&Account>;
+
+    /// Will add a new account
+    fn create_account(&mut self, id: String, kind: account::Kind) -> Result<(), &str>;
+}
+
 #[derive(Debug)]
 pub struct Block {
     pub previous_hash: String,
-    pub data: String,
+    pub transactions: Vec<Transaction>,
     pub hash: String,
     pub nonce: u32,
     pub timestamp: u64,
@@ -95,18 +185,21 @@ pub struct Block {
 impl Block {
     pub fn new(
         previous_hash: Option<String>,
-        data: String,
+        transactions: Vec<Transaction>,
         difficulty: u32,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let previous_hash = match previous_hash {
             Some(ph) => ph,
             None => "0".to_string(),
         };
-        let p = pow::ProofOfWork { data, difficulty };
+        let p = pow::ProofOfWork {
+            transactions,
+            difficulty,
+        };
         let (h, nonce, timestamp) = pow::mine(&p, &previous_hash)?;
         Ok(Block {
             previous_hash,
-            data: p.data,
+            transactions: p.transactions,
             hash: h,
             timestamp,
             nonce,
@@ -128,14 +221,17 @@ impl Blockchain {
         })
     }
 
-    pub fn add_block(&mut self, data: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn add_block(
+        &mut self,
+        transactions: Vec<Transaction>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let previous_block_hash = match self.blocks.last() {
             Some(pb) => Some(pb.hash.clone()),
             None => None,
         };
         self.blocks.push(Block::new(
             previous_block_hash,
-            data.to_string(),
+            transactions,
             self.difficulty,
         )?);
         Ok(())
@@ -146,16 +242,26 @@ impl Blockchain {
 pub mod test {
     use std::error::Error;
 
-    use crate::blockchain::Blockchain;
+    use crate::blockchain::{
+        Blockchain,
+        transaction::{Data, Transaction},
+    };
 
     #[test]
     fn test_blockchain() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut blockchain = Blockchain::new(u32::MAX)?;
 
         for n in 0..2 {
-            blockchain.add_block(&format!("{n}"))?;
+            let transactions = vec![Transaction::new(
+                Data::CreateUserAccount(format!("user_{n}")),
+                "system".to_string(),
+                n as u128,
+            )];
+
+            blockchain.add_block(transactions)?;
         }
-        println!("{:?}", blockchain);
+
+        println!("{:#?}", blockchain);
 
         Ok(())
     }
