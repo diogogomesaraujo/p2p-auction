@@ -102,6 +102,8 @@ pub mod pow {
 
 pub mod transaction {
     use crate::{blockchain::State, time::now_unix};
+    use ed25519_dalek_blake2b::{Keypair, PublicKey, Signature, Signer, Verifier};
+    use hex::ToHex;
     use serde::{Deserialize, Serialize};
     use std::error::Error;
 
@@ -128,8 +130,9 @@ pub mod transaction {
             record: Data,
             from: String,
             nonce: u64,
-            signature: String,
+            key: Keypair,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+            let signature = Self::sign(&record, &from, &nonce, &key)?;
             Ok(Self {
                 record,
                 from,
@@ -137,6 +140,53 @@ pub mod transaction {
                 nonce,
                 signature,
             })
+        }
+
+        fn serialize(
+            record: &Data,
+            from: &String,
+            nonce: &u64,
+        ) -> Result<String, Box<dyn Error + Send + Sync>> {
+            Ok(format!(
+                "{}:{}:{}",
+                serde_json::to_string(&record)?,
+                from,
+                nonce
+            ))
+        }
+
+        fn sign(
+            record: &Data,
+            from: &String,
+            nonce: &u64,
+            key: &Keypair,
+        ) -> Result<String, Box<dyn Error + Send + Sync>> {
+            let input = Self::serialize(record, from, nonce)?;
+            let signature = key.sign(input.as_bytes());
+            Ok(signature.encode_hex())
+        }
+
+        pub fn verify(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+            let bytes = &hex::decode(&self.from)?;
+            let pk = match PublicKey::from_bytes(bytes) {
+                Ok(pk) => pk,
+                _ => return Err("Malformed from field.".into()),
+            };
+            let signature = match Signature::from_bytes(&hex::decode(&self.signature)?) {
+                Ok(s) => s,
+                _ => return Err("Malformed signature.".into()),
+            };
+            match pk.verify(
+                match Transaction::serialize(&self.record, &self.from, &self.nonce) {
+                    Ok(input) => input,
+                    _ => return Err("Invalid fields.".into()),
+                }
+                .as_bytes(),
+                &signature,
+            ) {
+                Ok(_) => Ok(()),
+                _ => return Err("Invalid signature.".into()),
+            }
         }
 
         pub fn execute<T: State>(
@@ -327,12 +377,17 @@ impl Blockchain {
             return Err("Failed to produce a valid block.".into());
         }
 
-        if block_to_append.previous_hash != self.blocks[self.blocks.len() - 1].hash {
-            return Err("The new block does not point to the previous block in the chain.".into());
+        if let Some(block) = self.blocks.last() {
+            if block_to_append.previous_hash != block.hash {
+                return Err(
+                    "The new block does not point to the previous block in the chain.".into(),
+                );
+            }
         }
 
         block_to_append.transactions.iter().try_for_each(
             |t| -> Result<(), Box<dyn Error + Send + Sync>> {
+                t.verify()?;
                 t.execute(self)?;
                 Ok(())
             },
@@ -371,6 +426,9 @@ mod test {
         Blockchain,
         transaction::{Data, Transaction},
     };
+    use ed25519_dalek_blake2b::Keypair;
+    use hex::ToHex;
+    use rand::rngs::OsRng;
     use std::error::Error;
 
     #[test]
@@ -378,11 +436,13 @@ mod test {
         let mut blockchain = Blockchain::new(u32::MAX)?;
 
         for n in 0..2 {
+            let keys = Keypair::generate(&mut OsRng);
+
             let transactions = vec![Transaction::new(
                 Data::CreateUserAccount(format!("user_{n}")),
-                "system".to_string(),
+                keys.public.encode_hex(),
                 n,
-                "ekiwnv".to_string(),
+                keys,
             )?];
 
             blockchain.add_block(transactions)?;
