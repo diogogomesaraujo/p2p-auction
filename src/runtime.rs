@@ -17,6 +17,11 @@ impl Runtime {
 
     pub fn load_from_local(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         for rec in &self.state.local.value_records {
+            let quorum = match NonZeroUsize::new(rec.quorum) {
+                Some(q) => q,
+                None => return Err("Stored quorum must be greater than zero".into()),
+            };
+
             let record = Record {
                 key: RecordKey::new(&rec.key),
                 value: rec.value.clone(),
@@ -24,13 +29,10 @@ impl Runtime {
                 expires: None,
             };
 
-            self.swarm.behaviour_mut().kad.put_record(
-                record,
-                Quorum::N(
-                    NonZeroUsize::new(rec.quorum)
-                        .ok_or("Stored quorum must be greater than zero")?,
-                ),
-            )?;
+            self.swarm
+                .behaviour_mut()
+                .kad
+                .put_record(record, Quorum::N(quorum))?;
         }
 
         for rec in &self.state.local.provider_records {
