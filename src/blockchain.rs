@@ -214,6 +214,7 @@ pub mod transaction {
 pub mod account {
     use std::{collections::HashMap, error::Error};
 
+    /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
     #[derive(Clone, Debug)]
     pub struct Account {
         pub store: HashMap<String, String>,
@@ -222,6 +223,7 @@ pub mod account {
         pub tokens: u128,
     }
 
+    /// Enum that represents the types of accounts that can be created in the blockchain.
     #[derive(Clone, Debug)]
     pub enum Kind {
         User,
@@ -243,17 +245,17 @@ pub mod account {
 
 /// Module that defines the unsigned and signed block.
 pub mod block {
-    use blake2::Digest;
-    use serde::{Deserialize, Serialize};
-    use std::error::Error;
-
     use crate::blockchain::{
         HashFunction,
         hash::{self, encode_hash},
         pow,
         transaction::Transaction,
     };
+    use blake2::Digest;
+    use serde::{Deserialize, Serialize};
+    use std::error::Error;
 
+    /// Struct that represents the parameters that form the block's hash.
     pub struct UnsignedBlock {
         pub previous_hash: String,
         pub transactions: Vec<Transaction>,
@@ -262,6 +264,7 @@ pub mod block {
     }
 
     impl UnsignedBlock {
+        /// Function that creates a new unsigned block.
         pub fn new(
             previous_hash: &str,
             transactions: &[Transaction],
@@ -276,6 +279,7 @@ pub mod block {
             }
         }
 
+        /// Function that hashes an unsigned block to form a block that can be appended to the chain.
         pub fn hash(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
             let input = format!(
                 "{}:{}:{}:{}",
@@ -323,6 +327,7 @@ pub mod block {
             })
         }
 
+        /// Function that verifies if a block has a valid hash.
         pub fn verify(&self) -> bool {
             let unsigned_block = UnsignedBlock::new(
                 &self.previous_hash,
@@ -338,6 +343,7 @@ pub mod block {
     }
 }
 
+/// Trait that defines the functions that can mutate the blockchain.
 pub trait State {
     /// Will bring us all registered user ids
     fn get_user_ids(&self) -> Vec<String>;
