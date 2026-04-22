@@ -16,6 +16,7 @@ use std::error::Error;
 /// robustness and performance improvements in relation to the SHA-2 family.
 type HashFunction = Blake2b512;
 
+/// Module that defines the hash-function of the blockchain.
 pub mod hash {
     use crate::blockchain::HashFunction;
     use blake2::Digest;
@@ -50,6 +51,7 @@ pub mod hash {
     }
 }
 
+/// Module that defines the proof-of-work algorithm of the blockchain.
 pub mod pow {
     use crate::{
         blockchain::{block::UnsignedBlock, transaction::Transaction},
@@ -100,6 +102,7 @@ pub mod pow {
     }
 }
 
+/// Module that defines transactions and their execution.
 pub mod transaction {
     use crate::{blockchain::State, time::now_unix};
     use ed25519_dalek_blake2b::{Keypair, PublicKey, Signature, Signer, Verifier};
@@ -107,6 +110,8 @@ pub mod transaction {
     use serde::{Deserialize, Serialize};
     use std::error::Error;
 
+    /// Struct that represents a transaction that can be executed in the blockchain. A transaction can
+    /// change the current state of the chain.
     #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct Transaction {
         pub record: Data,
@@ -116,6 +121,7 @@ pub mod transaction {
         pub signature: String, // todo: refactor and use ed25519
     }
 
+    /// Enum that represents the different kinds of actions that can be performed.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum Data {
         CreateUserAccount(String),
@@ -126,6 +132,7 @@ pub mod transaction {
     }
 
     impl Transaction {
+        /// Function that creates a transaction.
         pub fn new(
             record: Data,
             from: String,
@@ -142,6 +149,7 @@ pub mod transaction {
             })
         }
 
+        /// Function that serializes the parameters used to compute a transaction's signature.
         fn serialize(
             record: &Data,
             from: &String,
@@ -155,6 +163,7 @@ pub mod transaction {
             ))
         }
 
+        /// Function that signs the parameters used to construct a transaction.
         fn sign(
             record: &Data,
             from: &String,
@@ -166,6 +175,7 @@ pub mod transaction {
             Ok(signature.encode_hex())
         }
 
+        /// Function that verifies the validity of a transaction.
         pub fn verify(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
             let bytes = &hex::decode(&self.from)?;
             let pk = match PublicKey::from_bytes(bytes) {
@@ -189,6 +199,7 @@ pub mod transaction {
             }
         }
 
+        /// Function that executes a transaction and changes the blockchain state.
         pub fn execute<T: State>(
             &self,
             _state: &mut T,
@@ -199,6 +210,7 @@ pub mod transaction {
     }
 }
 
+/// Module that defines a blockchain user account.
 pub mod account {
     use std::{collections::HashMap, error::Error};
 
@@ -229,11 +241,11 @@ pub mod account {
     }
 }
 
+/// Module that defines the unsigned and signed block.
 pub mod block {
-    use std::error::Error;
-
     use blake2::Digest;
     use serde::{Deserialize, Serialize};
+    use std::error::Error;
 
     use crate::blockchain::{
         HashFunction,
@@ -277,7 +289,7 @@ pub mod block {
     }
 
     /// Struct that defines a published block.
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct Block {
         pub previous_hash: String,
         pub transactions: Vec<Transaction>,
@@ -341,7 +353,7 @@ pub trait State {
 }
 
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Blockchain {
     pub blocks: Vec<Block>,
     pub difficulty: u32,
@@ -385,18 +397,23 @@ impl Blockchain {
             }
         }
 
-        block_to_append.transactions.iter().try_for_each(
-            |t| -> Result<(), Box<dyn Error + Send + Sync>> {
-                t.verify()?;
-                t.execute(self)?;
-                Ok(())
-            },
-        )?;
+        {
+            let mut blockchain_temp = self.clone();
+            block_to_append.transactions.iter().try_for_each(
+                |t| -> Result<(), Box<dyn Error + Send + Sync>> {
+                    t.verify()?;
+                    t.execute(&mut blockchain_temp)?;
+                    Ok(())
+                },
+            )?;
+            *self = blockchain_temp;
+        }
 
         self.blocks.push(block_to_append);
         Ok(())
     }
 
+    /// Function that verifies each block in the blockchain.
     pub fn verify(&self) -> bool {
         self.blocks.iter().fold(false, |acc, b| acc && b.verify())
     }
