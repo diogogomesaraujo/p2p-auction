@@ -89,8 +89,11 @@ pub mod pow {
                 }
 
                 let input = format!(
-                    "{}:{:?}:{}:{}",
-                    previous_hash, pow.transactions, nonce, timestamp
+                    "{}:{}:{}:{}",
+                    previous_hash,
+                    serde_json::to_string(&pow.transactions)?,
+                    nonce,
+                    timestamp
                 );
                 let h = hash::hash(HashFunction::new(), &input);
 
@@ -107,7 +110,7 @@ pub mod transaction {
     use serde::{Deserialize, Serialize};
     use std::error::Error;
 
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
     pub struct Transaction {
         pub record: Data,
         pub from: String,
