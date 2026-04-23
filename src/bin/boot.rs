@@ -1,4 +1,4 @@
-use blocktion::{boot::BootNode, key::get_key, rpc::Rpc};
+use blocktion::{boot::BootNode, key::get_key, rpc::DhtRpc};
 use clap::Parser;
 use libp2p::StreamProtocol;
 use std::error::Error;

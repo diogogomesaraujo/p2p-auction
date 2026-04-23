@@ -1,16 +1,15 @@
+use crate::{behaviour::DhtBehaviourEvent, runtime::Runtime};
 use async_trait::async_trait;
 use libp2p::{StreamProtocol, futures::StreamExt, identity::Keypair};
 use std::{error::Error, str::SplitWhitespace};
 use tokio::io::{AsyncBufReadExt, BufReader, Stdin};
-
-use crate::{behaviour::DhtBehaviourEvent, runtime::Runtime};
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
-pub trait Rpc {
+pub trait DhtRpc {
     /// Enum type that contains the different RPC calls an external node can make to the current one.
     type RpcAction;
 

@@ -8,7 +8,11 @@
 //! - [Full Blockchain in Go](https://www.youtube.com/playlist?list=PL0xRBLFXXsP6-hxQmCDcl_BHJMm0mhxx7);
 //! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e).
 
-use crate::blockchain::{account::Account, block::Block, transaction::Transaction};
+use crate::blockchain::{
+    account::Account,
+    block::Block,
+    transaction::{Mempool, Transaction},
+};
 use blake2::Blake2b512;
 use std::error::Error;
 
@@ -145,9 +149,9 @@ pub mod transaction {
             record: Data,
             from: String,
             nonce: u32,
-            key: &Keypair,
+            keys: &Keypair,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-            let signature = Self::sign(&record, &from, &nonce, &key)?;
+            let signature = Self::sign(&record, &from, &nonce, &keys)?;
             Ok(Self {
                 record,
                 from,
@@ -176,10 +180,10 @@ pub mod transaction {
             record: &Data,
             from: &String,
             nonce: &u32,
-            key: &Keypair,
+            keys: &Keypair,
         ) -> Result<String, Box<dyn Error + Send + Sync>> {
             let input = Self::serialize(record, from, nonce)?;
-            let signature = key.sign(input.as_bytes());
+            let signature = keys.sign(input.as_bytes());
             Ok(signature.encode_hex())
         }
 
@@ -222,7 +226,7 @@ pub mod transaction {
     pub type Memqueue = VecDeque<Transaction>;
 
     /// Struct that temporarily holds unexecuted transactions mapped by timestamp.
-    #[derive(Clone)]
+    #[derive(Debug, Clone)]
     pub struct Mempool(HashMap<Timestamp, Transaction>);
 
     impl Mempool {
@@ -311,6 +315,7 @@ pub mod account {
     /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
     #[derive(Clone, Debug)]
     pub struct Account {
+        pub id: String,
         pub store: HashMap<String, String>,
         pub kind: Kind,
         /// Amount of tokens that account owns (like BTC or ETH) -> might not need
@@ -327,8 +332,9 @@ pub mod account {
     }
 
     impl Account {
-        pub fn new(kind: Kind) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        pub fn new(kind: Kind, id: String) -> Result<Self, Box<dyn Error + Send + Sync>> {
             Ok(Self {
+                id,
                 store: HashMap::new(),
                 kind,
                 tokens: 0,
@@ -452,13 +458,19 @@ pub trait State {
     fn get_account_by_id(&self, id: &String) -> Option<&Account>;
 
     /// Will add a new account
-    fn create_account(&mut self, id: String, kind: account::Kind) -> Result<(), &str>;
+    fn create_account(
+        &mut self,
+        id: String,
+        kind: account::Kind,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
 
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
 #[derive(Debug, Clone)]
 pub struct Blockchain {
     pub blocks: Vec<Block>,
+    pub accounts: Vec<Account>,
+    pub transaction_mempool: Mempool,
     pub difficulty: u32,
 }
 
@@ -466,8 +478,10 @@ impl Blockchain {
     /// Function that creates a new blockchain instance.
     pub fn new(difficulty: u32) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
-            difficulty,
+            accounts: vec![],
+            transaction_mempool: Mempool::new(),
             blocks: vec![],
+            difficulty,
         })
     }
 
@@ -523,8 +537,13 @@ impl Blockchain {
 }
 
 impl State for Blockchain {
-    fn create_account(&mut self, _id: String, _kind: account::Kind) -> Result<(), &str> {
-        todo!()
+    fn create_account(
+        &mut self,
+        id: String,
+        kind: account::Kind,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.accounts.push(Account::new(kind, id)?);
+        Ok(())
     }
 
     fn get_account_by_id(&self, _id: &String) -> Option<&Account> {

@@ -1,4 +1,4 @@
-use crate::{behaviour::DhtBehaviour, gossip::topic, rpc::Rpc, runtime::Runtime, state::State};
+use crate::{behaviour::DhtBehaviour, gossip::topic, rpc::DhtRpc, runtime::Runtime, state::State};
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
@@ -35,7 +35,7 @@ impl BootNode {
 }
 
 #[async_trait]
-impl Rpc for BootNode {
+impl DhtRpc for BootNode {
     type RpcAction = RpcAction;
 
     fn action_from_str(action_text: &str) -> Option<Self::RpcAction> {

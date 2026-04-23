@@ -1,4 +1,4 @@
-use blocktion::{key::get_key, node::Node, rpc::Rpc};
+use blocktion::{key::get_key, node::Node, rpc::DhtRpc};
 use clap::Parser;
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
 use std::error::Error;

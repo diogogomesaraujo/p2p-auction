@@ -1,7 +1,7 @@
 use crate::{
     behaviour::DhtBehaviour,
     gossip::{Metadata, topic},
-    rpc::{LISTEN_ON, Rpc},
+    rpc::{DhtRpc, LISTEN_ON},
     runtime::Runtime,
     state::State,
 };
@@ -52,7 +52,7 @@ impl Node {
 }
 
 #[async_trait]
-impl Rpc for Node {
+impl DhtRpc for Node {
     type RpcAction = RpcAction;
 
     fn action_from_str(action_text: &str) -> Option<Self::RpcAction> {
