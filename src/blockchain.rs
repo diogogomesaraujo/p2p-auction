@@ -120,7 +120,7 @@ pub mod transaction {
 
     /// Struct that represents a transaction that can be executed in the blockchain. A transaction can
     /// change the current state of the chain.
-    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
     pub struct Transaction {
         pub record: Data,
         pub from: String,
@@ -130,7 +130,7 @@ pub mod transaction {
     }
 
     /// Enum that represents the different kinds of actions that can be performed.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
     pub enum Data {
         CreateUserAccount(String),
         ChangeStoreValue { key: String, value: String },
@@ -145,7 +145,7 @@ pub mod transaction {
             record: Data,
             from: String,
             nonce: u32,
-            key: Keypair,
+            key: &Keypair,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
             let signature = Self::sign(&record, &from, &nonce, &key)?;
             Ok(Self {
@@ -261,6 +261,45 @@ pub mod transaction {
             let memqueue = self.clone().to_sorted_queue();
             *self = Self::new();
             memqueue
+        }
+    }
+
+    #[cfg(test)]
+    pub mod test {
+        use crate::blockchain::transaction::{Data, Mempool, Transaction};
+        use ed25519_dalek_blake2b::Keypair;
+        use hex::ToHex;
+        use rand::rngs::OsRng;
+        use std::error::Error;
+
+        pub fn test_mempool() -> Result<(), Box<dyn Error + Send + Sync>> {
+            let k1 = Keypair::generate(&mut OsRng);
+            let k2 = Keypair::generate(&mut OsRng);
+
+            let t1 = {
+                let data = Data::CreateUserAccount("skylar".to_string());
+                let from = k2.public.encode_hex();
+                let nonce = 0;
+                Transaction::new(data, from, nonce, &k1)?
+            };
+
+            let t2 = {
+                let data = Data::CreateUserAccount("walter".to_string());
+                let from = k1.public.encode_hex();
+                let nonce = 0;
+                Transaction::new(data, from, nonce, &k2)?
+            };
+
+            let mut pool = Mempool::new();
+            pool.add_transaction(t1.clone());
+            pool.add_transaction(t2.clone());
+
+            assert_eq!(
+                pool.flush().into_iter().collect::<Vec<Transaction>>(),
+                vec![t1, t2]
+            );
+
+            Ok(())
         }
     }
 }
@@ -523,7 +562,7 @@ mod test {
                 Data::CreateUserAccount(format!("user_{n}")),
                 keys.public.encode_hex(),
                 n,
-                keys,
+                &keys,
             )?];
 
             blockchain.add_block(transactions)?;
