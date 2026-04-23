@@ -1,6 +1,6 @@
+use blocktion::{key::get_key, node::Node, rpc::Rpc};
 use clap::Parser;
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
-use p2p_auction::{key::get_key, node::Node, rpc::Rpc};
 use std::error::Error;
 use tokio::io::{BufReader, stdin};
 

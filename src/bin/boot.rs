@@ -1,6 +1,6 @@
+use blocktion::{boot::BootNode, key::get_key, rpc::Rpc};
 use clap::Parser;
 use libp2p::StreamProtocol;
-use p2p_auction::{boot::BootNode, key::get_key, rpc::Rpc};
 use std::error::Error;
 use tokio::io::{BufReader, stdin};
 

@@ -301,6 +301,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "blocktion"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "blake2 0.10.6",
+ "clap",
+ "ed25519-dalek-blake2b",
+ "hex",
+ "libp2p",
+ "libp2p-gossipsub",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2155,27 +2176,6 @@ name = "opaque-debug"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
-
-[[package]]
-name = "p2p-auction"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "blake2 0.10.6",
- "clap",
- "ed25519-dalek-blake2b",
- "hex",
- "libp2p",
- "libp2p-gossipsub",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
-]
 
 [[package]]
 name = "parking"

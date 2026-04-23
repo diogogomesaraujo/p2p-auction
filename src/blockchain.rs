@@ -421,7 +421,7 @@ impl Blockchain {
 
     /// Function that verifies each block in the blockchain.
     pub fn verify(&self) -> bool {
-        self.blocks.iter().fold(false, |acc, b| acc && b.verify())
+        self.blocks.iter().fold(true, |acc, b| acc && b.verify())
     }
 }
 
@@ -471,7 +471,7 @@ mod test {
             blockchain.add_block(transactions)?;
         }
 
-        blockchain.verify();
+        assert!(blockchain.verify());
 
         Ok(())
     }

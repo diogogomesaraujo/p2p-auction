@@ -1,5 +1,5 @@
 [package]
-name = "p2p-auction"
+name = "blocktion"
 version = "0.1.0"
 edition = "2024"
 
@@ -20,6 +20,7 @@ tracing-subscriber = "0.3.22"
 hex = "0.4.3"
 blake2 = "0.10.6"
 ed25519-dalek-blake2b = "1.0.2"
+rand = { version = "0.8", features = ["std"] }
 
 # net
 libp2p = { version = "0.56.0", features = [
@@ -38,4 +39,3 @@ libp2p-gossipsub = "0.49.4"
 # serialization
 serde = {version="1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
-rand = { version = "0.8", features = ["std"] }
