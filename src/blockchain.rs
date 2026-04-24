@@ -115,25 +115,28 @@ pub mod merkle {
         let mut pairs = transactions.chunks(2);
         while let Some(pair) = pairs.next() {
             match pair {
-                [left, right] => {
-                    tmp.push_back(hash(left.hash()?, right.hash()?)?);
+                [l, r] => {
+                    let lh = l.hash()?;
+                    let rh = r.hash()?;
+                    tmp.push_back(hash(&lh, &rh)?);
                 }
-                [single] => {
-                    let h = single.hash()?;
-                    tmp.push_back(hash(h.clone(), h)?);
+                [s] => {
+                    let sh = s.hash()?;
+                    tmp.push_back(hash(&sh, &sh)?);
                 }
                 _ => unreachable!(),
             }
         }
+        // stops iterating when produced a single hash -> the merkle root
         while tmp.len() > 1 {
             let mut tmp2: VecDeque<String> = VecDeque::new();
-            while let Some(left) = tmp.pop_front() {
+            while let Some(l) = tmp.pop_front() {
                 match tmp.pop_front() {
-                    Some(right) => {
-                        tmp2.push_back(hash(left, right)?);
+                    Some(r) => {
+                        tmp2.push_back(hash(&l, &r)?);
                     }
                     None => {
-                        tmp2.push_back(hash(left.clone(), left)?);
+                        tmp2.push_back(hash(&l, &l)?);
                     }
                 }
             }
@@ -151,7 +154,7 @@ pub mod merkle {
     }
 
     // stub for hashing a pair of leaves
-    pub fn hash(left: String, right: String) -> Result<String, Box<dyn Error + Send + Sync>> {
+    pub fn hash(left: &str, right: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
         let input = format!("{}:{}", left, right);
         let h = hash::hash(HashFunction::new(), &input);
         Ok(hash::encode_hash(&h))
