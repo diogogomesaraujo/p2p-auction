@@ -96,7 +96,7 @@ pub mod pow {
                 }
 
                 let unsigned_block =
-                    UnsignedBlock::new(previous_hash, &pow.transactions, nonce, timestamp);
+                    UnsignedBlock::new(previous_hash, &pow.transactions, nonce, timestamp)?;
 
                 let h = unsigned_block.hash()?;
 
@@ -108,12 +108,72 @@ pub mod pow {
     }
 }
 
+pub mod merkle {
+    use crate::blockchain::{HashFunction, hash, transaction::Transaction};
+    use blake2::Digest;
+    use std::{collections::VecDeque, error::Error};
+
+    pub fn root(transactions: &[Transaction]) -> Result<String, Box<dyn Error + Send + Sync>> {
+        if transactions.is_empty() {
+            return Err("Cannot build Merkle root from empty transaction list.".into());
+        }
+        let mut tmp: VecDeque<String> = VecDeque::new();
+        let mut pairs = transactions.chunks(2);
+        while let Some(pair) = pairs.next() {
+            match pair {
+                [l, r] => {
+                    let lh = l.hash()?;
+                    let rh = r.hash()?;
+                    tmp.push_back(hash(&lh, &rh)?);
+                }
+                [s] => {
+                    let sh = s.hash()?;
+                    tmp.push_back(hash(&sh, &sh)?);
+                }
+                _ => unreachable!(),
+            }
+        }
+        // stops iterating when produced a single hash -> the merkle root
+        while tmp.len() > 1 {
+            let mut tmp2: VecDeque<String> = VecDeque::new();
+            while let Some(l) = tmp.pop_front() {
+                match tmp.pop_front() {
+                    Some(r) => {
+                        tmp2.push_back(hash(&l, &r)?);
+                    }
+                    None => {
+                        tmp2.push_back(hash(&l, &l)?);
+                    }
+                }
+            }
+            tmp = tmp2;
+        }
+
+        match tmp.pop_front() {
+            Some(root) => return Ok(root),
+            _ => return Err("Merkle root calculation failed.".into()),
+        }
+    }
+
+    pub fn merkle_proof() {
+        todo!()
+    }
+
+    // stub for hashing a pair of leaves
+    pub fn hash(left: &str, right: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+        let input = format!("{}:{}", left, right);
+        let h = hash::hash(HashFunction::new(), &input);
+        Ok(hash::encode_hash(&h))
+    }
+}
+
 /// Module that defines transactions and their execution.
 pub mod transaction {
     use crate::{
-        blockchain::State,
+        blockchain::{HashFunction, State},
         time::{Timestamp, now_unix},
     };
+    use blake2::Digest;
     use ed25519_dalek_blake2b::{Keypair, PublicKey, Signature, Signer, Verifier};
     use hex::ToHex;
     use serde::{Deserialize, Serialize};
@@ -218,6 +278,12 @@ pub mod transaction {
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
             // TODO
             Ok(())
+        }
+
+        pub fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
+            let input = serde_json::to_string(self)?;
+            let h = crate::blockchain::hash::hash(HashFunction::new(), &input);
+            Ok(hex::encode(h))
         }
     }
 
@@ -349,7 +415,7 @@ pub mod block {
         blockchain::{
             HashFunction,
             hash::{self, encode_hash},
-            pow,
+            merkle, pow,
             transaction::Transaction,
         },
         time::Timestamp,
@@ -361,7 +427,7 @@ pub mod block {
     /// Struct that represents the parameters that form the block's hash.
     pub struct UnsignedBlock {
         pub previous_hash: String,
-        pub transactions: Vec<Transaction>,
+        pub merkle_root: String,
         pub nonce: u32,
         pub timestamp: Timestamp,
     }
@@ -372,24 +438,22 @@ pub mod block {
             previous_hash: &str,
             transactions: &[Transaction],
             nonce: u32,
-            timestamp: Timestamp,
-        ) -> Self {
-            Self {
+            timestamp: u64,
+        ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+            let merkle_root = merkle::root(transactions)?;
+            Ok(Self {
                 previous_hash: previous_hash.to_string(),
-                transactions: transactions.to_vec(),
+                merkle_root: merkle_root.to_string(),
                 nonce,
                 timestamp,
-            }
+            })
         }
 
         /// Function that hashes an unsigned block to form a block that can be appended to the chain.
         pub fn hash(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
             let input = format!(
                 "{}:{}:{}:{}",
-                self.previous_hash,
-                serde_json::to_string(&self.transactions)?,
-                self.nonce,
-                self.timestamp
+                self.previous_hash, self.merkle_root, self.nonce, self.timestamp
             );
             Ok(hash::hash(HashFunction::new(), &input))
         }
@@ -400,6 +464,7 @@ pub mod block {
     pub struct Block {
         pub previous_hash: String,
         pub transactions: Vec<Transaction>,
+        pub merkle_root: String,
         pub hash: String,
         pub nonce: u32,
         pub timestamp: Timestamp,
@@ -416,14 +481,19 @@ pub mod block {
                 Some(ph) => ph,
                 None => "0".to_string(),
             };
+
             let p = pow::ProofOfWork {
                 transactions,
                 difficulty,
             };
+
             let (h, nonce, timestamp) = pow::mine(&p, &previous_hash)?;
+            let merkle_root = crate::blockchain::merkle::root(&p.transactions)?;
+
             Ok(Block {
                 previous_hash,
                 transactions: p.transactions,
+                merkle_root,
                 hash: h,
                 timestamp,
                 nonce,
@@ -431,16 +501,16 @@ pub mod block {
         }
 
         /// Function that verifies if a block has a valid hash.
-        pub fn verify(&self) -> bool {
+        pub fn verify(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
             let unsigned_block = UnsignedBlock::new(
                 &self.previous_hash,
                 &self.transactions,
                 self.nonce,
                 self.timestamp,
-            );
+            )?;
             match unsigned_block.hash() {
-                Ok(h) => encode_hash(&h) == self.hash,
-                Err(_) => false,
+                Ok(h) => Ok(encode_hash(&h) == self.hash),
+                Err(_) => Ok(false),
             }
         }
     }
@@ -502,7 +572,7 @@ impl Blockchain {
         };
         let block_to_append = Block::new(previous_block_hash, transactions, self.difficulty)?;
 
-        if !block_to_append.verify() {
+        if !block_to_append.verify()? {
             return Err("Failed to produce a valid block.".into());
         }
 
@@ -531,8 +601,13 @@ impl Blockchain {
     }
 
     /// Function that verifies each block in the blockchain.
-    pub fn verify(&self) -> bool {
-        self.blocks.iter().fold(true, |acc, b| acc && b.verify())
+    pub fn verify(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        for block in &self.blocks {
+            if !block.verify()? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -587,7 +662,7 @@ mod test {
             blockchain.add_block(transactions)?;
         }
 
-        assert!(blockchain.verify());
+        assert!(blockchain.verify()?);
 
         Ok(())
     }
