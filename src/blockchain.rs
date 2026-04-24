@@ -6,7 +6,8 @@
 //! - [Simple PoW Implementation in Rust](https://hackernoon.com/rusty-chains-a-basic-blockchain-implementation-written-in-pure-rust-gk2m3uri);
 //! - [Bitcoin Protocol Specification](https://en.bitcoin.it/wiki/Protocol_documentation#Block_Headers);
 //! - [Full Blockchain in Go](https://www.youtube.com/playlist?list=PL0xRBLFXXsP6-hxQmCDcl_BHJMm0mhxx7);
-//! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e).
+//! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e);
+//! - [Merkle Tree in Blockchain Implementation]https://dsvynarenko.hashnode.dev/designing-blockchain-4-merkle-trees-and-state-verification.
 
 use crate::blockchain::{
     account::Account,
@@ -109,9 +110,21 @@ pub mod pow {
 }
 
 pub mod merkle {
-    use crate::blockchain::{HashFunction, block::Block, hash, transaction::Transaction};
+    use crate::blockchain::{HashFunction, hash, transaction::Transaction};
     use blake2::Digest;
-    use std::{collections::VecDeque, error::Error};
+    use std::{collections::VecDeque, error::Error, thread::current};
+
+    pub enum Direction {
+        Left,
+        Right,
+    }
+
+    pub struct Branch {
+        sibling_hash: String,
+        direction: Direction,
+    }
+
+    type Proof = Vec<String>;
 
     pub fn root(transactions: &[Transaction]) -> Result<String, Box<dyn Error + Send + Sync>> {
         if transactions.is_empty() {
@@ -155,11 +168,65 @@ pub mod merkle {
         }
     }
 
-    pub fn merkle_proof(
-        transaction_idx: u32,
+    pub fn proof(
+        transaction_idx: usize,
         transactions: &[Transaction],
-    ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-        todo!()
+    ) -> Result<Proof, Box<dyn Error + Send + Sync>> {
+        if transaction_idx > transactions.len() {
+            return Err("Transaction index was out of bounds".into());
+        }
+        let th = transactions[transaction_idx].hash()?;
+
+        let mut tmp: VecDeque<String> = VecDeque::new();
+        let mut pairs = transactions.chunks(2);
+        while let Some(pair) = pairs.next() {
+            match pair {
+                [l, r] => {
+                    let lh = l.hash()?;
+                    let rh = r.hash()?;
+                    tmp.push_back(hash(&lh, &rh)?);
+                }
+                [s] => {
+                    let sh = s.hash()?;
+                    tmp.push_back(hash(&sh, &sh)?);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        let mut proof: Proof = Vec::new();
+
+        while tmp.len() > 1 {
+            let mut tmp2: VecDeque<String> = VecDeque::new();
+            loop {
+                match (tmp.pop_front(), tmp.pop_front()) {
+                    (Some(l), Some(r)) => {
+                        if l == th {
+                            proof.push(r.clone());
+                        } else if r == th {
+                            proof.push(l.clone());
+                        }
+                        tmp2.push_back(hash(&l, &r)?);
+                    }
+                    (Some(s), None) => {
+                        if s == th {
+                            proof.push(s.clone());
+                        }
+                        tmp2.push_back(hash(&s, &s)?);
+                    }
+                    (None, _) => break,
+                }
+            }
+            tmp = tmp2;
+        }
+
+        match tmp.pop_front() {
+            Some(root) => {
+                proof.push(root);
+                Ok(proof)
+            }
+            _ => return Err("Failed to provide Merkle proof.".into()),
+        }
     }
 
     // stub for hashing a pair of leaves
