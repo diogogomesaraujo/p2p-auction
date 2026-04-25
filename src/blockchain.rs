@@ -574,7 +574,7 @@ pub mod block {
             }
         }
 
-        pub fn generate_merkle_proof(
+        pub fn generate_proof(
             &self,
             transaction_idx: usize,
         ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
