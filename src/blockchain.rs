@@ -112,17 +112,7 @@ pub mod pow {
 pub mod merkle {
     use crate::blockchain::{HashFunction, hash, transaction::Transaction};
     use blake2::Digest;
-    use std::{collections::VecDeque, error::Error, thread::current};
-
-    pub enum Direction {
-        Left,
-        Right,
-    }
-
-    pub struct Branch {
-        sibling_hash: String,
-        direction: Direction,
-    }
+    use std::{collections::VecDeque, error::Error};
 
     type Proof = Vec<String>;
 
