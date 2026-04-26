@@ -336,8 +336,8 @@ pub mod transaction {
             &self,
             _state: &mut T,
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
-            // TODO
-            Ok(())
+            // check and increment nonce
+            todo!()
         }
 
         pub fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
@@ -444,6 +444,7 @@ pub mod account {
         pub id: String,
         pub store: HashMap<String, String>,
         pub kind: Kind,
+        pub nonce: u32,
         /// Amount of tokens that account owns (like BTC or ETH) -> might not need
         pub tokens: u128,
     }
@@ -462,10 +463,14 @@ pub mod account {
             Ok(Self {
                 id,
                 store: HashMap::new(),
+                nonce: 0,
                 kind,
                 tokens: 0,
             })
         }
+
+        // verify the last confirmed nonce in blockchain for self address
+        // increment by one and sign transaction with it
     }
 }
 
@@ -574,7 +579,7 @@ pub mod block {
             }
         }
 
-        pub fn generate_proof_for_transaction(
+        pub fn transaction_proof(
             &self,
             transaction_idx: usize,
         ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
