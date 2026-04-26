@@ -12,16 +12,32 @@
 use crate::blockchain::{
     account::Account,
     block::Block,
+    ed25519::string_to_public_key,
     transaction::{Mempool, Transaction},
 };
 use blake2::Blake2b512;
-use std::error::Error;
+use ed25519_dalek_blake2b::Signature;
+use std::{collections::HashMap, error::Error};
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
 ///
 /// [Blake2](https://web.archive.org/web/20161002114950/http://blake2.net/) was chosen due to its
 /// robustness and performance improvements in relation to the SHA-2 family.
 type HashFunction = Blake2b512;
+
+pub mod ed25519 {
+    use ed25519_dalek_blake2b::PublicKey;
+    use std::error::Error;
+
+    pub fn string_to_public_key(
+        public_key: &str,
+    ) -> Result<PublicKey, Box<dyn Error + Send + Sync>> {
+        match PublicKey::from_bytes(&hex::decode(public_key)?) {
+            Ok(pk) => Ok(pk),
+            Err(e) => Err(e.to_string().into()),
+        }
+    }
+}
 
 /// Module that defines the hash-function of the blockchain.
 pub mod hash {
@@ -72,7 +88,7 @@ pub mod pow {
 
     /// Constant that represents the magic number used to define the difficulty of mineration.
     const TARGET: &[u8] = &[
-        0, 0, 0x0F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0,
     ];
 
@@ -271,11 +287,11 @@ pub mod merkle {
 /// Module that defines transactions and their execution.
 pub mod transaction {
     use crate::{
-        blockchain::{HashFunction, State},
+        blockchain::{HashFunction, WorldState, ed25519::string_to_public_key},
         time::{Timestamp, now_unix},
     };
     use blake2::Digest;
-    use ed25519_dalek_blake2b::{Keypair, PublicKey, Signature, Signer, Verifier};
+    use ed25519_dalek_blake2b::{Keypair, Signature, Signer, Verifier};
     use hex::ToHex;
     use serde::{Deserialize, Serialize};
     use std::{
@@ -350,11 +366,7 @@ pub mod transaction {
 
         /// Function that verifies the validity of a transaction.
         pub fn validate(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
-            let bytes = &hex::decode(&self.from)?;
-            let pk = match PublicKey::from_bytes(bytes) {
-                Ok(pk) => pk,
-                _ => return Err("Malformed from field.".into()),
-            };
+            let pk = string_to_public_key(&self.from)?;
             let signature = match Signature::from_bytes(&hex::decode(&self.signature)?) {
                 Ok(s) => s,
                 _ => return Err("Malformed signature.".into()),
@@ -373,12 +385,12 @@ pub mod transaction {
         }
 
         /// Function that executes a transaction and changes the blockchain state.
-        pub fn execute<T: State>(
+        pub fn execute<T: WorldState>(
             &self,
             _state: &mut T,
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
             // check and increment nonce
-            todo!()
+            Ok(())
         }
 
         pub fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
@@ -485,36 +497,32 @@ pub mod transaction {
 
 /// Module that defines a blockchain user account.
 pub mod account {
-    use std::{collections::HashMap, error::Error};
+    use std::error::Error;
+
+    const INITIAL_TOKEN_COUNT: u128 = 5;
 
     /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
     #[derive(Clone, Debug)]
     pub struct Account {
-        pub id: String,
-        pub store: HashMap<String, String>,
         pub kind: Kind,
-        pub nonce: u32,
-        /// Amount of tokens that account owns (like BTC or ETH) -> might not need
         pub tokens: u128,
+        pub nonce: u64,
+        pub public_key: String,
     }
 
     /// Enum that represents the types of accounts that can be created in the blockchain.
     #[derive(Clone, Debug)]
     pub enum Kind {
         User,
-
-        // like smart contract in etherium -> might not need
-        Contract,
     }
 
     impl Account {
-        pub fn new(kind: Kind, id: String) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        pub fn new(kind: Kind, public_key: String) -> Result<Self, Box<dyn Error + Send + Sync>> {
             Ok(Self {
-                id,
-                store: HashMap::new(),
-                nonce: 0,
                 kind,
-                tokens: 0,
+                nonce: 0,
+                public_key,
+                tokens: INITIAL_TOKEN_COUNT,
             })
         }
 
@@ -641,7 +649,9 @@ pub mod block {
 }
 
 /// Trait that defines the functions that can mutate the blockchain.
-pub trait State {
+pub trait WorldState {
+    const CREATE_ACCOUNT_MESSAGE: &str = "blocktion";
+
     /// Will bring us all registered user ids
     fn get_user_ids(&self) -> Vec<String>;
 
@@ -649,13 +659,13 @@ pub trait State {
     fn get_account_by_id_mut(&mut self, id: &String) -> Option<&mut Account>;
 
     /// Will return a account given it's id if is available
-    fn get_account_by_id(&self, id: &String) -> Option<&Account>;
+    fn get_account_by_id(&self, id: &str) -> Option<&Account>;
 
     /// Will add a new account
     fn create_account(
         &mut self,
-        id: String,
-        kind: account::Kind,
+        public_key: &str,
+        signature: &Signature,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
 
@@ -663,7 +673,7 @@ pub trait State {
 #[derive(Debug, Clone)]
 pub struct Blockchain {
     pub blocks: Vec<Block>,
-    pub accounts: Vec<Account>,
+    pub accounts: HashMap<String, Account>,
     pub transaction_mempool: Mempool,
     pub difficulty: u32,
 }
@@ -672,7 +682,7 @@ impl Blockchain {
     /// Function that creates a new blockchain instance.
     pub fn new(difficulty: u32) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
-            accounts: vec![],
+            accounts: HashMap::new(),
             transaction_mempool: Mempool::new(),
             blocks: vec![],
             difficulty,
@@ -742,18 +752,26 @@ impl Blockchain {
     }
 }
 
-impl State for Blockchain {
+impl WorldState for Blockchain {
     fn create_account(
         &mut self,
-        id: String,
-        kind: account::Kind,
+        public_key: &str,
+        signature: &Signature,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.accounts.push(Account::new(kind, id)?);
+        let pk = string_to_public_key(public_key)?;
+        if let Err(_) = pk.verify_strict(Blockchain::CREATE_ACCOUNT_MESSAGE.as_bytes(), signature) {
+            return Err("The signature is not verifiable by the public key.".into());
+        }
+
+        self.accounts.insert(
+            public_key.to_string(),
+            Account::new(account::Kind::User, public_key.to_string())?,
+        );
         Ok(())
     }
 
-    fn get_account_by_id(&self, _id: &String) -> Option<&Account> {
-        todo!()
+    fn get_account_by_id(&self, public_key: &str) -> Option<&Account> {
+        self.accounts.get(&public_key.to_string())
     }
 
     fn get_account_by_id_mut(&mut self, _id: &String) -> Option<&mut Account> {
