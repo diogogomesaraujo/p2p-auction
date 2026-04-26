@@ -1,5 +1,6 @@
 use crate::{
     MAX_CONSECUTIVE_FAILURES,
+    blockchain::transaction::Transaction,
     gossip::{Metadata, topic},
     runtime::Runtime,
     time::now_unix,
@@ -362,16 +363,22 @@ impl DhtBehaviourEvent {
                             }
                         }
                         Err(e) => error!("Invalid metadata payload: {e}"),
-                        // FIX! validate claimed peer_id matches the cryptographic source
                     },
-                    topic::TRANSACTIONS => {
-                        info!(
-                            "Received transaction gossip ({} bytes) from {:?}.",
-                            message.data.len(),
-                            propagation_source
-                        );
-                        // TODO: deserialize Transaction, validate signature, add to mempool
-                    }
+
+                    topic::TRANSACTIONS => match from_slice::<Transaction>(&message.data) {
+                        Ok(msg) => {
+                            info!(
+                                "Received transaction gossip ({} bytes) from {:?}.",
+                                message.data.len(),
+                                propagation_source
+                            );
+
+                            msg.validate()?;
+
+                            runtime.state.mempool.add_transaction(msg);
+                        }
+                        Err(e) => error!("Invalid Transaction payload: {e}"),
+                    },
 
                     topic::BLOCKS => {
                         info!(
@@ -379,7 +386,7 @@ impl DhtBehaviourEvent {
                             message.data.len(),
                             propagation_source
                         );
-                        // TODO: deserialize Block, verify, append to chain
+                        todo!("deserialize Block, verify, append to chain")
                     }
 
                     topic::PEER_REPUTATION => {
@@ -388,7 +395,7 @@ impl DhtBehaviourEvent {
                             message.data.len(),
                             propagation_source
                         );
-                        // TODO: deserialize reputation report, update PeerInfo score
+                        todo!("deserialize reputation report, update PeerInfo score")
                     }
 
                     topic::SUSPICIOUS_PEERS => {
@@ -397,7 +404,9 @@ impl DhtBehaviourEvent {
                             message.data.len(),
                             propagation_source
                         );
-                        // TODO: deserialize report, increment consecutive_failures for reported peer
+                        todo!(
+                            "deserialize report, increment consecutive_failures for reported peer"
+                        )
                     }
 
                     topic::LIVENESS => {

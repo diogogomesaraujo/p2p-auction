@@ -1,4 +1,7 @@
-use crate::time::{Timestamp, now_unix};
+use crate::{
+    blockchain::{Blockchain, transaction::Mempool},
+    time::{Timestamp, now_unix},
+};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use serde_json::{from_slice, to_vec_pretty};
@@ -11,10 +14,12 @@ use std::{
 
 pub const STATE_FILE: &str = "config/local.json";
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct State {
     pub local: Local,
     pub peers: HashMap<PeerId, PeerInfo>,
+    pub blockchain: Blockchain,
+    pub mempool: Mempool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,6 +62,8 @@ impl State {
         Ok(Self {
             local: Local::load()?,
             peers: HashMap::new(),
+            mempool: Mempool::new(),
+            blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
         })
     }
 }

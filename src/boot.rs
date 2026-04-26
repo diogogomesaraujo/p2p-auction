@@ -1,4 +1,7 @@
-use crate::{behaviour::DhtBehaviour, gossip::topic, rpc::DhtRpc, runtime::Runtime, state::State};
+use crate::{
+    LOOKUP_QUORUM, behaviour::DhtBehaviour, gossip::topic, rpc::DhtRpc, runtime::Runtime,
+    state::State,
+};
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
@@ -75,7 +78,9 @@ impl DhtRpc for BootNode {
                 kad_cfg.set_parallelism(ALPHA_VALUE);
                 kad_cfg.set_provider_record_ttl(Some(Duration::from_secs(48 * 60 * 60)));
                 kad_cfg.set_provider_publication_interval(Some(Duration::from_secs(12 * 60 * 60)));
-                kad_cfg.set_caching(kad::Caching::Enabled { max_peers: 1 });
+                kad_cfg.set_caching(kad::Caching::Enabled {
+                    max_peers: LOOKUP_QUORUM,
+                });
 
                 let store = kad::store::MemoryStore::new(local_id);
                 let kad = kad::Behaviour::with_config(local_id, store, kad_cfg);
