@@ -109,13 +109,24 @@ pub mod pow {
     }
 }
 
+/// Module that defines the merkle tree structure for lightweight transaction verification
 pub mod merkle {
     use crate::blockchain::{HashFunction, hash, transaction::Transaction};
     use blake2::Digest;
     use std::{collections::VecDeque, error::Error};
 
-    type Proof = Vec<String>;
+    /// Enum that represents the side of the sibling node in the tree.
+    /// Useful to build and verify Merkle proofs.
+    pub enum Side {
+        Left,
+        Right,
+    }
 
+    /// Type that represents a Merkle proof. It is a list of `(Side, hash)` pairs,
+    /// one per tree level, where each entry is the sibling hash needed to recompute the root.
+    type Proof = Vec<(String, Side)>;
+
+    /// Function that returns the Merkle root of a given set of transactions
     pub fn root(transactions: &[Transaction]) -> Result<String, Box<dyn Error + Send + Sync>> {
         if transactions.is_empty() {
             return Err("Cannot build Merkle root from empty transaction list.".into());
@@ -136,7 +147,7 @@ pub mod merkle {
                 _ => unreachable!(),
             }
         }
-        // stops iterating when produced a single hash -> the merkle root
+
         while tmp.len() > 1 {
             let mut tmp2: VecDeque<String> = VecDeque::new();
             while let Some(l) = tmp.pop_front() {
@@ -158,6 +169,8 @@ pub mod merkle {
         }
     }
 
+    /// Function that produces the Merkle proof for the transaction at the given index.
+    /// Tree is treated internally as a queue, avoiding the need for a recursive type.
     pub fn proof(
         transaction_idx: usize,
         transactions: &[Transaction],
@@ -192,15 +205,15 @@ pub mod merkle {
                 match (tmp.pop_front(), tmp.pop_front()) {
                     (Some(l), Some(r)) => {
                         if l == th {
-                            proof.push(r.clone());
+                            proof.push((r.clone(), Side::Right));
                         } else if r == th {
-                            proof.push(l.clone());
+                            proof.push((l.clone(), Side::Left));
                         }
                         tmp2.push_back(hash(&l, &r)?);
                     }
                     (Some(s), None) => {
                         if s == th {
-                            proof.push(s.clone());
+                            proof.push((s.clone(), Side::Left));
                         }
                         tmp2.push_back(hash(&s, &s)?);
                     }
@@ -211,15 +224,31 @@ pub mod merkle {
         }
 
         match tmp.pop_front() {
-            Some(root) => {
-                proof.push(root);
-                Ok(proof)
-            }
+            Some(_) => Ok(proof),
             _ => return Err("Failed to provide Merkle proof.".into()),
         }
     }
 
-    // stub for hashing a pair of leaves
+    /// Function which verifies that the given transaction and Merkle proof correctly
+    /// produce the target Merkle root.
+    pub fn verify(
+        transaction: Transaction,
+        root: String,
+        proof: Proof,
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
+        let result = proof.iter().try_fold(
+            transaction.hash()?,
+            |acc, (sibling, side)| -> Result<String, Box<dyn Error + Send + Sync>> {
+                match side {
+                    Side::Left => hash(sibling, &acc),
+                    Side::Right => hash(&acc, sibling),
+                }
+            },
+        )?;
+        Ok(result == root)
+    }
+
+    /// Function that concatenates and hashes sibling nodes in a Merkle tree.
     pub fn hash(left: &str, right: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
         let input = format!("{}:{}", left, right);
         let h = hash::hash(HashFunction::new(), &input);
@@ -480,7 +509,8 @@ pub mod block {
         blockchain::{
             HashFunction,
             hash::{self, encode_hash},
-            merkle, pow,
+            merkle::{self, Side},
+            pow,
             transaction::Transaction,
         },
         time::Timestamp,
@@ -579,10 +609,12 @@ pub mod block {
             }
         }
 
-        pub fn transaction_proof(
+        /// Function that returns the proof that a given transaction belongs to the block.
+        /// If the transaction doesn't belong to the block it returns Err.
+        pub fn provide_transaction_proof(
             &self,
             transaction_idx: usize,
-        ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+        ) -> Result<Vec<(String, Side)>, Box<dyn Error + Send + Sync>> {
             merkle::proof(transaction_idx, &self.transactions)
         }
     }
