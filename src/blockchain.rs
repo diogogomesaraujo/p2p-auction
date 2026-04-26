@@ -7,7 +7,7 @@
 //! - [Bitcoin Protocol Specification](https://en.bitcoin.it/wiki/Protocol_documentation#Block_Headers);
 //! - [Full Blockchain in Go](https://www.youtube.com/playlist?list=PL0xRBLFXXsP6-hxQmCDcl_BHJMm0mhxx7);
 //! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e);
-//! - [Merkle Tree in Blockchain Implementation]https://dsvynarenko.hashnode.dev/designing-blockchain-4-merkle-trees-and-state-verification.
+//! - [Merkle Tree in Blockchain Implementation](https://dsvynarenko.hashnode.dev/designing-blockchain-4-merkle-trees-and-state-verification).
 
 use crate::blockchain::{
     account::Account,
@@ -76,6 +76,12 @@ pub mod pow {
         0, 0, 0,
     ];
 
+    macro_rules! puzzle {
+        ($hash:ident, $target:expr) => {
+            $hash.as_slice() < $target
+        };
+    }
+
     /// Struct that represents a proof-of-work instance used to create a blockchain.
     pub struct ProofOfWork {
         pub transactions: Vec<Transaction>,
@@ -101,11 +107,15 @@ pub mod pow {
 
                 let h = unsigned_block.hash()?;
 
-                if h.as_slice() < TARGET {
+                if puzzle!(h, TARGET) {
                     return Ok((hex::encode(h), nonce, timestamp));
                 }
             }
         }
+    }
+
+    pub fn verify(hash: Vec<u8>) -> bool {
+        puzzle!(hash, TARGET)
     }
 }
 
@@ -279,7 +289,7 @@ pub mod transaction {
         pub from: String,
         pub created_at: Timestamp,
         pub nonce: u32,
-        pub signature: String, // todo: refactor and use ed25519
+        pub signature: String,
     }
 
     /// Enum that represents the different kinds of actions that can be performed.
