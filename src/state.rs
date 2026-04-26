@@ -1,5 +1,5 @@
 use crate::{
-    blockchain::{Blockchain, transaction::Mempool},
+    blockchain::Blockchain,
     time::{Timestamp, now_unix},
 };
 use libp2p::PeerId;
@@ -19,7 +19,6 @@ pub struct State {
     pub local: Local,
     pub peers: HashMap<PeerId, PeerInfo>,
     pub blockchain: Blockchain,
-    pub mempool: Mempool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -62,7 +61,6 @@ impl State {
         Ok(Self {
             local: Local::load()?,
             peers: HashMap::new(),
-            mempool: Mempool::new(),
             blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
         })
     }

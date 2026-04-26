@@ -178,7 +178,7 @@ pub mod merkle {
         if transaction_idx > transactions.len() {
             return Err("Transaction index was out of bounds".into());
         }
-        let th = transactions[transaction_idx].hash()?;
+        let mut th = transactions[transaction_idx].hash()?;
 
         let mut tmp: VecDeque<String> = VecDeque::new();
         let mut pairs = transactions.chunks(2);
@@ -209,13 +209,15 @@ pub mod merkle {
                         } else if r == th {
                             proof.push((l.clone(), Side::Left));
                         }
-                        tmp2.push_back(hash(&l, &r)?);
+                        th = hash(&l, &r)?;
+                        tmp2.push_back(th.clone());
                     }
                     (Some(s), None) => {
                         if s == th {
                             proof.push((s.clone(), Side::Left));
                         }
-                        tmp2.push_back(hash(&s, &s)?);
+                        th = hash(&s, &s)?;
+                        tmp2.push_back(th.clone());
                     }
                     (None, _) => break,
                 }
@@ -411,8 +413,12 @@ pub mod transaction {
         }
 
         /// Function that adds a transaction to the mempool.
-        pub fn add_transaction(&mut self, transaction: Transaction) {
+        pub fn add_transaction(
+            &mut self,
+            transaction: Transaction,
+        ) -> Result<(), Box<dyn Error + Send + Sync>> {
             self.0.insert(transaction.created_at, transaction);
+            Ok(())
         }
 
         /// Function that flushes the current mempool and returns a queue sorted by timestamp.
@@ -420,6 +426,10 @@ pub mod transaction {
             let memqueue = self.clone().to_sorted_queue();
             *self = Self::new();
             memqueue
+        }
+
+        pub fn contains(&self, transaction: &Transaction) -> bool {
+            self.0.contains_key(&transaction.created_at)
         }
     }
 
@@ -450,8 +460,8 @@ pub mod transaction {
             };
 
             let mut pool = Mempool::new();
-            pool.add_transaction(t1.clone());
-            pool.add_transaction(t2.clone());
+            pool.add_transaction(t1.clone())?;
+            pool.add_transaction(t2.clone())?;
 
             assert_eq!(
                 pool.flush().into_iter().collect::<Vec<Transaction>>(),
@@ -657,6 +667,10 @@ impl Blockchain {
             blocks: vec![],
             difficulty,
         })
+    }
+
+    pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+        todo!()
     }
 
     /// Function that appends a block to the blockchain.

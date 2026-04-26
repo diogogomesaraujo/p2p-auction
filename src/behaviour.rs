@@ -1,6 +1,6 @@
 use crate::{
     MAX_CONSECUTIVE_FAILURES,
-    blockchain::transaction::Transaction,
+    blockchain::{block::Block, transaction::Transaction},
     gossip::{Metadata, topic},
     runtime::Runtime,
     time::now_unix,
@@ -375,19 +375,35 @@ impl DhtBehaviourEvent {
 
                             msg.validate()?;
 
-                            runtime.state.mempool.add_transaction(msg);
+                            if !runtime.state.blockchain.transaction_mempool.contains(&msg) {
+                                runtime
+                                    .state
+                                    .blockchain
+                                    .transaction_mempool
+                                    .add_transaction(msg)?;
+                            }
                         }
-                        Err(e) => error!("Invalid Transaction payload: {e}"),
+                        Err(e) => error!("Invalid transaction payload: {e}"),
                     },
 
-                    topic::BLOCKS => {
-                        info!(
-                            "Received block gossip ({} bytes) from {:?}.",
-                            message.data.len(),
-                            propagation_source
-                        );
-                        todo!("deserialize Block, verify, append to chain")
-                    }
+                    topic::BLOCKS => match from_slice::<Block>(&message.data) {
+                        Ok(msg) => {
+                            info!(
+                                "Received block gossip ({} bytes) from {:?}.",
+                                message.data.len(),
+                                propagation_source
+                            );
+                            if !msg.verify()? {
+                                error!(
+                                    "Received invalid block from {:?}, discarding.",
+                                    propagation_source
+                                );
+                            } else {
+                                runtime.state.blockchain.accept_block(msg)?;
+                            }
+                        }
+                        Err(e) => error!("Invalid block payload: {e}"),
+                    },
 
                     topic::PEER_REPUTATION => {
                         info!(
