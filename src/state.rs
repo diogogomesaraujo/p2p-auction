@@ -23,17 +23,11 @@ pub struct State {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PeerInfo {
-    pub first_seen: Option<u64>,
-    pub last_seen: Option<u64>,
-    pub last_successful_ping: Option<u64>,
-    pub last_successful_kad_response: Option<u64>,
-    pub successful_pings: u32,
-    pub failed_pings: u32,
-    pub consecutive_failures: u32,
+    pub first_seen: Option<Timestamp>,
+    pub last_seen: Option<Timestamp>,
+    pub gossipsub_score: f64,
+    pub is_bootnode: bool,
     pub session_count: u32,
-    pub is_routable_candidate: bool,
-    pub is_pending_routable: bool,
-    pub is_in_routing_table: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -1,7 +1,6 @@
 use crate::{
-    MAX_CONSECUTIVE_FAILURES,
     blockchain::{block::Block, transaction::Transaction},
-    gossip::{Metadata, topic},
+    gossip::topic,
     runtime::Runtime,
     time::now_unix,
 };
@@ -100,21 +99,6 @@ impl DhtBehaviourEvent {
 
                 if let Some(entry) = runtime.state.peers.get_mut(&peer_id) {
                     entry.last_seen = Some(now);
-
-                    if let Some(_) = &cause {
-                        entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
-                    } else {
-                        entry.consecutive_failures = 0;
-                    }
-
-                    if entry.consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
-                        warn!(
-                            "Evicting {:?} after {} consecutive failures",
-                            peer_id, entry.consecutive_failures
-                        );
-                        runtime.swarm.behaviour_mut().kad.remove_peer(&peer_id);
-                        entry.is_in_routing_table = false;
-                    }
                 }
             }
 
@@ -141,14 +125,6 @@ impl DhtBehaviourEvent {
                         entry.first_seen = Some(now);
                     }
                     entry.last_seen = Some(now);
-                    entry.is_in_routing_table = true;
-                    entry.is_routable_candidate = true;
-
-                    if let Some(evicted) = old_peer
-                        && let Some(old) = runtime.state.peers.get_mut(&evicted)
-                    {
-                        old.is_in_routing_table = false;
-                    }
                 }
 
                 kad::Event::UnroutablePeer { peer } => {
@@ -160,8 +136,6 @@ impl DhtBehaviourEvent {
                         entry.first_seen = Some(now);
                     }
                     entry.last_seen = Some(now);
-                    entry.is_routable_candidate = false;
-                    entry.is_pending_routable = false;
                 }
 
                 kad::Event::RoutablePeer { peer, address } => {
@@ -173,8 +147,6 @@ impl DhtBehaviourEvent {
                         entry.first_seen = Some(now);
                     }
                     entry.last_seen = Some(now);
-                    entry.is_routable_candidate = true;
-
                     runtime
                         .swarm
                         .behaviour_mut()
@@ -191,7 +163,6 @@ impl DhtBehaviourEvent {
                         entry.first_seen = Some(now);
                     }
                     entry.last_seen = Some(now);
-                    entry.is_pending_routable = true;
                 }
 
                 kad::Event::ModeChanged { new_mode } => {
@@ -285,11 +256,6 @@ impl DhtBehaviourEvent {
                             error!("RepublishRecord failed: {:?}", err);
                         }
                     }
-
-                    let now = now_unix()?;
-                    for peer in runtime.state.peers.values_mut() {
-                        peer.last_successful_kad_response = Some(now);
-                    }
                 }
             },
 
@@ -305,18 +271,6 @@ impl DhtBehaviourEvent {
                     entry.first_seen = Some(now);
                 }
                 entry.last_seen = Some(now);
-
-                match event.result {
-                    Ok(_) => {
-                        entry.last_successful_ping = Some(now);
-                        entry.successful_pings = entry.successful_pings.saturating_add(1);
-                        entry.consecutive_failures = 0;
-                    }
-                    Err(_) => {
-                        entry.failed_pings = entry.failed_pings.saturating_add(1);
-                        entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
-                    }
-                }
             }
 
             SwarmEvent::Behaviour(DhtBehaviourEvent::Identify(event)) => {
@@ -351,20 +305,6 @@ impl DhtBehaviourEvent {
                 );
 
                 match t {
-                    topic::METADATA => match from_slice::<Metadata>(&message.data) {
-                        Ok(msg) => {
-                            if msg.peer_id == propagation_source.to_string() {
-                                info!("Metadata: {:?}", msg)
-                            } else {
-                                error!(
-                                    "Metadata payload discarded. Peer {:?} impersonated {}.",
-                                    propagation_source, msg.peer_id
-                                )
-                            }
-                        }
-                        Err(e) => error!("Invalid metadata payload: {e}"),
-                    },
-
                     topic::TRANSACTIONS => match from_slice::<Transaction>(&message.data) {
                         Ok(msg) => {
                             info!(
@@ -395,38 +335,6 @@ impl DhtBehaviourEvent {
                         }
                         Err(e) => error!("Invalid block payload: {e}"),
                     },
-
-                    topic::PEER_REPUTATION => {
-                        info!(
-                            "Received peer reputation update ({} bytes) from {:?}.",
-                            message.data.len(),
-                            propagation_source
-                        );
-                        todo!("deserialize reputation report, update PeerInfo score")
-                    }
-
-                    topic::SUSPICIOUS_PEERS => {
-                        info!(
-                            "Received suspicious peer report ({} bytes) from {:?}.",
-                            message.data.len(),
-                            propagation_source
-                        );
-                        todo!(
-                            "deserialize report, increment consecutive_failures for reported peer"
-                        )
-                    }
-
-                    topic::LIVENESS => {
-                        info!(
-                            "Received liveness heartbeat ({} bytes) from {:?}.",
-                            message.data.len(),
-                            propagation_source
-                        );
-                        let now = now_unix()?;
-                        if let Some(entry) = runtime.state.peers.get_mut(&propagation_source) {
-                            entry.last_seen = Some(now);
-                        }
-                    }
 
                     _ => {
                         info!("Received message for unknown topic {}", t);

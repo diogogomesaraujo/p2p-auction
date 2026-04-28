@@ -1,7 +1,7 @@
 use crate::{
     QUORUM,
     behaviour::DhtBehaviour,
-    gossip::{Metadata, topic},
+    gossip::topic,
     rpc::{DhtRpc, LISTEN_ON},
     runtime::Runtime,
     state::State,
@@ -19,7 +19,6 @@ use libp2p::{
 use libp2p_gossipsub::{
     self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
 };
-use serde_json::to_vec;
 use std::{
     collections::hash_map::DefaultHasher,
     error::Error,
@@ -43,7 +42,6 @@ pub enum RpcAction {
     FindProviders,
     RoutingTable,
     ConnectedPeers,
-    Metadata,
 }
 
 impl Node {
@@ -66,7 +64,6 @@ impl DhtRpc for Node {
             "FIND_PROVIDERS" => Some(RpcAction::FindProviders),
             "ROUTING_TABLE" => Some(RpcAction::RoutingTable),
             "CONNECTED_PEERS" => Some(RpcAction::ConnectedPeers),
-            "METADATA" => Some(RpcAction::Metadata),
             _ => None,
         }
     }
@@ -134,10 +131,6 @@ impl DhtRpc for Node {
 
                 gossip.subscribe(&IdentTopic::new(topic::TRANSACTIONS))?;
                 gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
-                gossip.subscribe(&IdentTopic::new(topic::METADATA))?;
-                gossip.subscribe(&IdentTopic::new(topic::PEER_REPUTATION))?;
-                gossip.subscribe(&IdentTopic::new(topic::SUSPICIOUS_PEERS))?;
-                gossip.subscribe(&IdentTopic::new(topic::LIVENESS))?;
 
                 Ok(DhtBehaviour {
                     kad,
@@ -250,23 +243,7 @@ impl DhtRpc for Node {
                     }
                 }
             }
-
-            RpcAction::Metadata => {
-                let payload = Metadata {
-                    peer_id: runtime.swarm.local_peer_id().to_string(),
-                    role: Self::arg_parse(args)?,
-                    supported_protocols: vec!["/p2p-auction/1.0.0".into()],
-                    connected_peers: runtime.swarm.connected_peers().count(),
-                };
-
-                runtime
-                    .swarm
-                    .behaviour_mut()
-                    .gossip
-                    .publish(IdentTopic::new(topic::METADATA), to_vec(&payload)?)?;
-            }
         }
-
         Ok(())
     }
 }
