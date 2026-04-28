@@ -666,23 +666,6 @@ pub mod block {
     }
 }
 
-/// Trait that defines the functions that can mutate the blockchain.
-pub trait WorldState {
-    const CREATE_ACCOUNT_MESSAGE: &str = "blocktion";
-
-    fn account_balance(&self, public_key: &str) -> u128;
-
-    /// Will return a account given it's id if is available
-    fn get_account_by_id(&self, public_key: &str) -> Option<&Account>;
-
-    /// Will add a new account
-    fn create_account(
-        &mut self,
-        public_key: &str,
-        signature: &Signature,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
-}
-
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
 #[derive(Debug, Clone)]
 pub struct Blockchain {
@@ -766,6 +749,32 @@ impl Blockchain {
     }
 }
 
+/// Trait that defines the functions that can mutate the blockchain.
+pub trait WorldState {
+    const CREATE_ACCOUNT_MESSAGE: &str = "blocktion";
+
+    fn account_balance(&self, public_key: &str) -> Option<u128>;
+
+    fn transfer_funds(
+        &mut self,
+        from: &str,
+        to: &str,
+        amount: u128,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
+
+    /// Will return a account given it's id if is available
+    fn get_account_by_id(&self, public_key: &str) -> Option<&Account>;
+
+    fn get_account_by_id_mut(&mut self, public_key: &str) -> Option<&mut Account>;
+
+    /// Will add a new account
+    fn create_account(
+        &mut self,
+        public_key: &str,
+        signature: &Signature,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>;
+}
+
 impl WorldState for Blockchain {
     fn create_account(
         &mut self,
@@ -784,12 +793,46 @@ impl WorldState for Blockchain {
         Ok(())
     }
 
-    fn account_balance(&self, _public_key: &str) -> u128 {
-        0
+    fn transfer_funds(
+        &mut self,
+        from: &str,
+        to: &str,
+        amount: u128,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        match (self.get_account_by_id(from), self.get_account_by_id(to)) {
+            (Some(f), Some(_)) => {
+                if f.tokens >= amount {
+                    let from = match self.get_account_by_id_mut(from) {
+                        Some(from) => from,
+                        None => return Err("From account does not exist.".into()),
+                    };
+                    from.tokens -= amount;
+
+                    let to = match self.get_account_by_id_mut(to) {
+                        Some(from) => from,
+                        None => return Err("To account does not exist.".into()),
+                    };
+                    to.tokens += amount;
+                } else {
+                    return Err("Not enough funds.".into());
+                }
+            }
+            _ => return Err("Invalid accounts.".into()),
+        };
+
+        Ok(())
+    }
+
+    fn account_balance(&self, public_key: &str) -> Option<u128> {
+        Some(self.accounts.get(public_key)?.tokens)
     }
 
     fn get_account_by_id(&self, public_key: &str) -> Option<&Account> {
         self.accounts.get(&public_key.to_string())
+    }
+
+    fn get_account_by_id_mut(&mut self, public_key: &str) -> Option<&mut Account> {
+        self.accounts.get_mut(&public_key.to_string())
     }
 }
 
