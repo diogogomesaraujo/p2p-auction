@@ -254,7 +254,6 @@ impl DhtBehaviourEvent {
 
                         kad::QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(PeerRecord {
                             record: Record { key, value, .. },
-                            peer,
                             ..
                         }))) => {
                             info!(
