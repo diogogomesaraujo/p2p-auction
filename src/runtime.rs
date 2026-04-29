@@ -1,5 +1,4 @@
 use crate::{
-    INITIAL_PEER_SCORE,
     behaviour::DhtBehaviour,
     blockchain::{block::Block, transaction::Transaction},
     state::State,
