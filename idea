@@ -21,3 +21,8 @@ rpc:
     - account_history
     - transaction_block (find the block where a transaction occured)
     - transaction_proof (using merkle tree to return merkle proof)
+
+how can an entering node get the correct blockchain?
+
+when a miner discovers a block it multicasts a hault requests with the proposed block and if the puzzle is correct
+the nodes accept the vote and decide on the block that will be added to the chain.

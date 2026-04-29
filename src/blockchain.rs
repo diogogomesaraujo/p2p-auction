@@ -299,7 +299,7 @@ pub mod transaction {
         blockchain::{
             Blockchain, HashFunction, WorldState,
             ed25519::{string_to_public_key, string_to_signature},
-            hash::Hashable,
+            hash::{self, Hashable},
         },
         time::{Timestamp, now_unix},
     };
@@ -313,6 +313,7 @@ pub mod transaction {
     /// change the current state of the chain.
     #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
     pub struct Transaction {
+        pub id: String,
         pub record: Data,
         pub from: String,
         pub created_at: Timestamp,
@@ -326,18 +327,10 @@ pub mod transaction {
         CreateUserAccount {
             public_key: String,
         },
-        ChangeStoreValue {
-            key: String,
-            value: String,
-        },
         TransferTokens {
             from: String,
             to: String,
-            amount: u128,
-        },
-        CreateTokens {
-            receiver: String,
-            amount: u128,
+            amount: u64,
         },
         // add more and adapt for auction
     }
@@ -350,7 +343,18 @@ pub mod transaction {
             nonce: u32,
             signature: &str,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+            let id = hex::encode(hash::hash(
+                HashFunction::new(),
+                &format!(
+                    "{}:{}:{}:{}",
+                    serde_json::to_string(&record)?,
+                    from,
+                    nonce,
+                    signature
+                ),
+            ));
             Ok(Self {
+                id,
                 record,
                 from,
                 created_at: now_unix()?,
@@ -543,13 +547,13 @@ pub mod transaction {
 pub mod account {
     use std::error::Error;
 
-    const INITIAL_TOKEN_COUNT: u128 = 5;
+    const INITIAL_TOKEN_COUNT: u64 = 5;
 
     /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
     #[derive(Clone, Debug)]
     pub struct Account {
         pub kind: Kind,
-        pub tokens: u128,
+        pub tokens: u64,
         pub nonce: u64,
         pub public_key: String,
     }
@@ -727,15 +731,13 @@ impl Blockchain {
         &mut self,
         block_to_append: &Block,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut blockchain_temp = self.clone();
         block_to_append.transactions.iter().try_for_each(
             |t| -> Result<(), Box<dyn Error + Send + Sync>> {
                 t.verify()?;
-                t.execute(&mut blockchain_temp)?;
+                t.execute(self)?;
                 Ok(())
             },
         )?;
-        *self = blockchain_temp;
         Ok(())
     }
 
@@ -804,9 +806,9 @@ impl Blockchain {
             }
         }
 
-        self.execute_transactions(&block_to_append)?;
+        let mut hypothetical_blockchain = self.clone();
+        hypothetical_blockchain.execute_transactions(&block_to_append)?;
 
-        self.blocks.push(block_to_append);
         Ok(())
     }
 
@@ -829,15 +831,15 @@ pub trait Mine {}
 /// Trait that defines the functions that can mutate the blockchain.
 pub trait WorldState {
     const CREATE_ACCOUNT_MESSAGE: &str = "blocktion";
-    const MINER_COMPENSATION: u128 = 5;
+    const MINER_COMPENSATION: u64 = 5;
 
-    fn account_balance(&self, public_key: &str) -> Option<u128>;
+    fn account_balance(&self, public_key: &str) -> Option<u64>;
 
     fn transfer_funds(
         &mut self,
         from: &str,
         to: &str,
-        amount: u128,
+        amount: u64,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     fn compensate_miner(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>>;
@@ -864,7 +866,7 @@ impl WorldState for Blockchain {
         &mut self,
         from: &str,
         to: &str,
-        amount: u128,
+        amount: u64,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match (self.get_account_by_id(from), self.get_account_by_id(to)) {
             (Some(f), Some(_)) => {
@@ -900,7 +902,7 @@ impl WorldState for Blockchain {
         }
     }
 
-    fn account_balance(&self, public_key: &str) -> Option<u128> {
+    fn account_balance(&self, public_key: &str) -> Option<u64> {
         Some(self.accounts.get(public_key)?.tokens)
     }
 
