@@ -1,8 +1,8 @@
 use crate::{
     blockchain::{block::Block, transaction::Transaction},
-    gossip::topic,
     runtime::Runtime,
     time::now_unix,
+    topic::topic,
 };
 use libp2p::{
     identify,
@@ -72,6 +72,26 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
+                // GossipSub handles blacklisted peers in runtime automatically. So connections are silently refused.
+                //
+                // Explicitely blacklist peer if it is in the persistent state's blacklist
+                if runtime
+                    .state
+                    .peers
+                    .get(&peer_id)
+                    .map_or(false, |p| p.blacklisted)
+                {
+                    runtime
+                        .swarm
+                        .behaviour_mut()
+                        .gossip
+                        .blacklist_peer(&peer_id);
+                    warn!(
+                        "Runtime blacklisted peer {:?} from persistent blacklist",
+                        peer_id
+                    );
+                }
+
                 let now = now_unix()?;
 
                 let entry = runtime.state.peers.entry(peer_id).or_default();
@@ -299,26 +319,55 @@ impl DhtBehaviourEvent {
             })) => {
                 let t = message.topic.as_str();
 
+                // GossipSub automatically rejects messages on unsubscribed topics (prevents probing/flooding)
+
                 info!(
                     "Received gossip message from {:?}, id {:?}, topic {}",
                     propagation_source, message_id, t
                 );
 
                 match t {
-                    topic::TRANSACTIONS => match from_slice::<Transaction>(&message.data) {
-                        Ok(msg) => {
-                            info!(
-                                "Received transaction gossip ({} bytes) from {:?}.",
-                                message.data.len(),
-                                propagation_source
-                            );
-                            if let Err(e) = runtime.submit_transaction(msg) {
-                                error!("Failed to process gossiped transaction: {e}");
+                    topic::TRANSACTIONS => {
+                        match from_slice::<Transaction>(&message.data) {
+                            Ok(msg) => {
+                                info!(
+                                    "Received transaction gossip ({} bytes) from {:?}.",
+                                    message.data.len(),
+                                    propagation_source
+                                );
+
+                                // Reward honest peer before processing so a valid-but-locally-rejected
+                                // tx does not punish an honest peer.
+
+                                if let Err(e) = runtime.submit_transaction(msg) {
+                                    error!("Failed to process gossiped transaction: {e}");
+                                }
+                            }
+                            Err(e) => {
+                                // Might need to penalize explicitely
+                                error!("Invalid transaction payload: {e}");
+                                let Some(entry) = runtime.state.peers.get_mut(&propagation_source)
+                                else {
+                                    return Err(format!("Unknown peer {propagation_source:?} sent invalid transaction").into());
+                                };
+                                entry.invalid_message_count =
+                                    entry.invalid_message_count.saturating_add(1);
+                                if entry.invalid_message_count >= 5 {
+                                    entry.blacklisted = true;
+                                    runtime.state.local.blacklist_peer(&propagation_source);
+                                    runtime.state.local.save()?;
+                                    runtime
+                                        .swarm
+                                        .behaviour_mut()
+                                        .gossip
+                                        .blacklist_peer(&propagation_source);
+                                    warn!("Blacklisted malicious peer {:?}", propagation_source);
+                                }
                             }
                         }
-                        Err(e) => error!("Invalid transaction payload: {e}"),
-                    },
+                    }
 
+                    // For Blocks do a simmilar logic
                     topic::BLOCKS => match from_slice::<Block>(&message.data) {
                         Ok(msg) => {
                             info!(
@@ -326,6 +375,7 @@ impl DhtBehaviourEvent {
                                 message.data.len(),
                                 propagation_source
                             );
+
                             if let Err(e) = runtime.accept_block(msg) {
                                 error!(
                                     "Failed to process gossiped block from {:?}: {e}",
@@ -354,6 +404,22 @@ impl DhtBehaviourEvent {
                 topic,
             })) => {
                 info!("Peer {:?} unsubscribed from topic {}", peer_id, topic);
+            }
+
+            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::SlowPeer {
+                peer_id,
+                failed_messages,
+            })) => {
+                warn!(
+                    "Slow peer {:?}: {:?} failed messages — penalising",
+                    peer_id, failed_messages
+                );
+                // // decide application_score along with gossip configuration
+                // runtime
+                //     .swarm
+                //     .behaviour_mut()
+                //     .gossip
+                //     .set_application_score(&peer_id, ());
             }
 
             _ => {}

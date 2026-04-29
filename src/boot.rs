@@ -1,4 +1,4 @@
-use crate::{behaviour::DhtBehaviour, gossip::topic, rpc::DhtRpc, runtime::Runtime, state::State};
+use crate::{behaviour::DhtBehaviour, rpc::DhtRpc, runtime::Runtime, state::State, topic::topic};
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,

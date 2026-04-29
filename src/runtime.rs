@@ -1,11 +1,11 @@
 use crate::{
     behaviour::DhtBehaviour,
     blockchain::{block::Block, transaction::Transaction},
-    gossip,
     state::State,
+    topic,
 };
 use libp2p::{
-    Swarm,
+    PeerId, Swarm,
     kad::{Quorum, Record, RecordKey},
 };
 use libp2p_gossipsub::IdentTopic;
@@ -29,7 +29,7 @@ impl Runtime {
         self.swarm
             .behaviour_mut()
             .gossip
-            .publish(IdentTopic::new(gossip::topic::BLOCKS), to_vec(&block)?)?;
+            .publish(IdentTopic::new(topic::topic::BLOCKS), to_vec(&block)?)?;
         Ok(())
     }
 
@@ -52,7 +52,7 @@ impl Runtime {
                 .add_transaction(transaction.clone())?;
 
             self.swarm.behaviour_mut().gossip.publish(
-                IdentTopic::new(gossip::topic::TRANSACTIONS),
+                IdentTopic::new(topic::topic::TRANSACTIONS),
                 to_vec(&transaction)?,
             )?;
         }
@@ -85,6 +85,12 @@ impl Runtime {
                 .behaviour_mut()
                 .kad
                 .start_providing(RecordKey::new(&rec.key))?;
+        }
+
+        for peer_str in &self.state.local.blacklisted_peers.clone() {
+            let peer_id: PeerId = peer_str.parse()?;
+            self.swarm.behaviour_mut().gossip.blacklist_peer(&peer_id);
+            self.state.peers.entry(peer_id).or_default().blacklisted = true;
         }
 
         let _ = self.swarm.behaviour_mut().kad.bootstrap();
