@@ -1,0 +1,9 @@
+valid transaction (ok(msg)) +
+invalid transaction payload -
+valid block (gossip accepted) +
+block rejected by accept_block-
+malformed block payload (!!) -
+slow peer event (make it depend on n failed messages) -
+ping failure / exceed timeout -
+
+make an adjust score funct

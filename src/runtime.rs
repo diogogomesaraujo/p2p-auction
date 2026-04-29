@@ -1,4 +1,5 @@
 use crate::{
+    INITIAL_PEER_SCORE,
     behaviour::DhtBehaviour,
     blockchain::{block::Block, transaction::Transaction},
     state::State,
@@ -57,6 +58,27 @@ impl Runtime {
             )?;
         }
 
+        Ok(())
+    }
+
+    /// Function that adjust a peer's GossipSub score by a given delta.
+    /// If peer doesn't yet have a score it returns the INITIAL_PEER_SCORE adjusted by the delta.
+    pub fn adjust_score(
+        &mut self,
+        peer_id: PeerId,
+        delta: f64,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if let Some(score) = self.swarm.behaviour_mut().gossip.peer_score(&peer_id) {
+            self.swarm
+                .behaviour_mut()
+                .gossip
+                .set_application_score(&peer_id, score + delta);
+        } else {
+            self.swarm
+                .behaviour_mut()
+                .gossip
+                .set_application_score(&peer_id, INITIAL_PEER_SCORE + delta);
+        }
         Ok(())
     }
 

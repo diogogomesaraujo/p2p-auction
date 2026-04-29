@@ -13,3 +13,4 @@ pub const CONFIG_DIR: &str = "config";
 pub const QUORUM: usize = 3;
 pub const LOOKUP_QUORUM: u16 = 1;
 pub const INVALID_MESSAGE_THRESHOLD: u32 = 5;
+pub const INITIAL_PEER_SCORE: f64 = 0.0;
