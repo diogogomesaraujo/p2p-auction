@@ -1,6 +1,89 @@
 syntax = "proto3";
 package blockchain;
 
-message CreateAccountMessage {
+// Merkle Tree
+
+enum Side {
+  SIDE_LEFT = 0;
+  SIDE_RIGHT = 1;
+}
+
+message Branch {
+  string hash = 1;
+  Side side = 2;
+}
+
+message MerkleProof {
+  repeated Branch branches = 1;
+}
+
+// Request Types
+
+message CreateUserAccountRequest {
   string public_key = 1;
+}
+
+message TransferTokensRequest {
+  string from = 1;
+  string to = 2;
+  uint64 amount = 3;
+}
+
+message TransactionRequest {
+  oneof data {
+    CreateUserAccountRequest create_user_account_request = 1;
+    TransferTokensRequest transfer_tokens_request = 2;
+  }
+  string signature = 3;
+  string from = 4;
+  uint32 nonce = 5;
+}
+
+message AccountBalanceRequest {
+  string account = 1;
+}
+
+message CheckTransactionInBlockRequest {
+  string transaction_id = 1;
+  string block_hash = 2;
+  optional MerkleProof proof = 3;
+}
+
+message GetTransactionBlockRequest {
+  string transaction_id = 1;
+}
+
+// Response Types
+
+enum ResponseState {
+  RESPONSE_STATE_SUCCESSFUL = 0;
+  RESPONSE_STATE_FAILED = 1;
+}
+
+message TransactionResponse {
+  ResponseState state = 1;
+  string block_hash = 2;
+  string transaction_id = 3;
+  MerkleProof proof = 4;
+}
+
+message AccountBalanceResponse {
+  uint64 balance = 1;
+}
+
+message CheckTransactionInBlockResponse {
+  ResponseState state = 1;
+}
+
+message GetTransactionBlockResponse {
+  ResponseState state = 1;
+  optional string transaction_id = 3;
+  optional MerkleProof proof = 4;
+}
+
+service NodeRpcService {
+  rpc Transaction(TransactionRequest) returns (TransactionResponse);
+  rpc AccountBalance(AccountBalanceRequest) returns (AccountBalanceResponse);
+  rpc CheckTransactionInBlock(CheckTransactionInBlockRequest) returns (CheckTransactionInBlockResponse);
+  rpc GetTransactionBlock(GetTransactionBlockRequest) returns (GetTransactionBlockResponse);
 }
