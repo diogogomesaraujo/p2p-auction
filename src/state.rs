@@ -1,4 +1,5 @@
 use crate::{
+    INVALID_MESSAGE_THRESHOLD,
     blockchain::Blockchain,
     time::{Timestamp, now_unix},
 };
@@ -25,15 +26,22 @@ pub struct State {
 pub struct PeerInfo {
     pub first_seen: Option<Timestamp>,
     pub last_seen: Option<Timestamp>,
-    pub gossipsub_score: f64,
-    pub is_bootnode: bool,
     pub session_count: u32,
+    pub blacklisted: bool,
+    pub invalid_message_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+impl PeerInfo {
+    pub fn is_malicious(&self) -> bool {
+        self.invalid_message_count >= INVALID_MESSAGE_THRESHOLD
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Local {
     pub value_records: Vec<ValueRecord>,
     pub provider_records: Vec<ProviderRecord>,
+    pub blacklisted_peers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,5 +114,17 @@ impl Local {
             announced_at: now_unix()?,
         });
         Ok(())
+    }
+
+    pub fn blacklist_peer(&mut self, peer_id: &PeerId) {
+        let s = peer_id.to_base58();
+        if !self.blacklisted_peers.contains(&s) {
+            self.blacklisted_peers.push(s);
+        }
+    }
+
+    pub fn unblacklist_peer(&mut self, peer_id: &PeerId) {
+        let s = peer_id.to_base58();
+        self.blacklisted_peers.retain(|p| p != &s);
     }
 }

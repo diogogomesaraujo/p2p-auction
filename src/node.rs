@@ -1,10 +1,10 @@
 use crate::{
     QUORUM,
     behaviour::DhtBehaviour,
-    gossip::topic,
     rpc::{DhtRpc, LISTEN_ON},
     runtime::Runtime,
     state::State,
+    topic::topic,
 };
 use async_trait::async_trait;
 use libp2p::{

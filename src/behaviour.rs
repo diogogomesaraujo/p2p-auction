@@ -1,8 +1,8 @@
 use crate::{
     blockchain::{block::Block, transaction::Transaction},
-    gossip::topic,
     runtime::Runtime,
     time::now_unix,
+    topic::topic,
 };
 use libp2p::{
     identify,
@@ -14,11 +14,6 @@ use libp2p_gossipsub::{self as gossipsub};
 use serde_json::from_slice;
 use std::error::Error;
 use tracing::{error, info, warn};
-
-// implement security context
-// trust_table / seen_ids
-// (later bounded LRU / Bloom filter and persist `trust` across restarts)
-// is_duplicate() / is_seen()
 
 /// Struct that represents the `libp2p` primitives used to construct the DHT.
 #[derive(NetworkBehaviour)]
@@ -77,8 +72,25 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                // Add sybil / spoofing mitigation
-                // refuse connections from blacklisted peers
+                // GossipSub handles blacklisted peers in runtime automatically. So connections are silently refused.
+                //
+                // Explicitely blacklist peer if it is in the persistent state's blacklist
+                if runtime
+                    .state
+                    .peers
+                    .get(&peer_id)
+                    .map_or(false, |p| p.blacklisted)
+                {
+                    runtime
+                        .swarm
+                        .behaviour_mut()
+                        .gossip
+                        .blacklist_peer(&peer_id);
+                    warn!(
+                        "Runtime blacklisted peer {:?} from persistent blacklist",
+                        peer_id
+                    );
+                }
 
                 let now = now_unix()?;
 
@@ -307,23 +319,13 @@ impl DhtBehaviourEvent {
             })) => {
                 let t = message.topic.as_str();
 
-                // check if propagation source is blacklisted. If so, ignore
-                // prevents eclipse
-
-                // detect duplicate / replay
-                // duplicate message id -> payload was already processed
-
-                // prevent premptively unhandled / unsubscribed topics
-                // might be a sign of probing / flooding attack
-
-                // at last if message passes through mark seen
+                // GossipSub automatically rejects messages on unsubscribed topics (prevents probing/flooding)
 
                 info!(
                     "Received gossip message from {:?}, id {:?}, topic {}",
                     propagation_source, message_id, t
                 );
 
-                // topic specific validation and trust feedback
                 match t {
                     topic::TRANSACTIONS => match from_slice::<Transaction>(&message.data) {
                         Ok(msg) => {
@@ -333,16 +335,20 @@ impl DhtBehaviourEvent {
                                 propagation_source
                             );
 
-                            // reward before processing so a valid-but-locally-rejected tx doesn't punish a honest peer
+                            // Reward honest peer before processing so a valid-but-locally-rejected
+                            // tx does not punish an honest peer.
 
                             if let Err(e) = runtime.submit_transaction(msg) {
                                 error!("Failed to process gossiped transaction: {e}");
                             }
                         }
                         Err(e) => error!("Invalid transaction payload: {e}"),
-                        // penalize and evict blacklisted
+                        // Penalise since malformed payload is always the sender's fault.
+                        // If the peer is persistently malicious, blacklist it so gossipsub
+                        // stops routing their messages entirely. (Might define a count for this type of events)
                     },
 
+                    // For Blocks do a simmilar logic
                     topic::BLOCKS => match from_slice::<Block>(&message.data) {
                         Ok(msg) => {
                             info!(
@@ -351,7 +357,6 @@ impl DhtBehaviourEvent {
                                 propagation_source
                             );
 
-                            // reward
                             if let Err(e) = runtime.accept_block(msg) {
                                 error!(
                                     "Failed to process gossiped block from {:?}: {e}",
@@ -360,7 +365,6 @@ impl DhtBehaviourEvent {
                             }
                         }
                         Err(e) => error!("Invalid block payload: {e}"),
-                        // penalize and evict blacklisted
                     },
 
                     _ => {
@@ -381,6 +385,22 @@ impl DhtBehaviourEvent {
                 topic,
             })) => {
                 info!("Peer {:?} unsubscribed from topic {}", peer_id, topic);
+            }
+
+            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::SlowPeer {
+                peer_id,
+                failed_messages,
+            })) => {
+                warn!(
+                    "Slow peer {:?}: {:?} failed messages — penalising",
+                    peer_id, failed_messages
+                );
+                // // decide application_score along with gossip configuration
+                // runtime
+                //     .swarm
+                //     .behaviour_mut()
+                //     .gossip
+                //     .set_application_score(&peer_id, ());
             }
 
             _ => {}
