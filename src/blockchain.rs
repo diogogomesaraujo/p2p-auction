@@ -21,6 +21,7 @@ type HashFunction = Blake2b512;
 
 pub mod ed25519 {
     use ed25519_dalek_blake2b::{PublicKey, Signature};
+    use hex::ToHex;
     use std::error::Error;
 
     pub fn string_to_public_key(
@@ -37,6 +38,14 @@ pub mod ed25519 {
             Ok(pk) => Ok(pk),
             Err(e) => Err(e.to_string().into()),
         }
+    }
+
+    pub fn signature_tp_string(signature: &Signature) -> String {
+        signature.encode_hex()
+    }
+
+    pub fn public_key_to_string(public_key: &PublicKey) -> String {
+        public_key.encode_hex()
     }
 }
 
@@ -83,7 +92,7 @@ pub mod hash {
 /// Module that defines the proof-of-work algorithm of the blockchain.
 pub mod pow {
     use crate::{
-        blockchain::{block::UnsignedBlock, transaction::Transaction},
+        blockchain::{block::UnsignedBlock, hash, transaction::Transaction},
         time::{Timestamp, now_unix},
     };
     use std::error::Error;
@@ -130,7 +139,7 @@ pub mod pow {
                 let h = unsigned_block.hash()?;
 
                 if puzzle!(h, TARGET) {
-                    return Ok((hex::encode(h), nonce, timestamp));
+                    return Ok((hash::encode_hash(&h), nonce, timestamp));
                 }
             }
         }
@@ -298,14 +307,13 @@ pub mod transaction {
     use crate::{
         blockchain::{
             Blockchain, HashFunction, WorldState,
-            ed25519::{string_to_public_key, string_to_signature},
+            ed25519::{signature_tp_string, string_to_public_key, string_to_signature},
             hash::{self, Hashable},
         },
         time::{Timestamp, now_unix},
     };
     use blake2::Digest;
     use ed25519_dalek_blake2b::{Keypair, Signer, Verifier};
-    use hex::ToHex;
     use serde::{Deserialize, Serialize};
     use std::{collections::HashMap, error::Error};
 
@@ -343,7 +351,7 @@ pub mod transaction {
             nonce: u32,
             signature: &str,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-            let id = hex::encode(hash::hash(
+            let id = hash::encode_hash(&hash::hash(
                 HashFunction::new(),
                 &format!(
                     "{}:{}:{}:{}",
@@ -385,12 +393,11 @@ pub mod transaction {
             keys: &Keypair,
         ) -> Result<Transaction, Box<dyn Error + Send + Sync>> {
             let input = Self::serialize(&record, &from.to_string(), &nonce)?;
-            let signature: String = keys.sign(input.as_bytes()).encode_hex();
             Ok(Transaction::new(
                 record,
                 from.to_string(),
                 nonce,
-                &signature,
+                &signature_tp_string(&keys.sign(input.as_bytes())),
             )?)
         }
 
@@ -424,7 +431,6 @@ pub mod transaction {
                 Data::TransferTokens { from, to, amount } => {
                     blockchain.transfer_funds(from, to, *amount)?
                 }
-                _ => {}
             };
 
             Ok(())
@@ -435,7 +441,7 @@ pub mod transaction {
         fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
             let input = serde_json::to_string(self)?;
             let h = crate::blockchain::hash::hash(HashFunction::new(), &input);
-            Ok(hex::encode(h))
+            Ok(hash::encode_hash(&h))
         }
     }
 
@@ -501,9 +507,11 @@ pub mod transaction {
 
     #[cfg(test)]
     pub mod test {
-        use crate::blockchain::transaction::{Data, Mempool, Transaction};
+        use crate::blockchain::{
+            ed25519::public_key_to_string,
+            transaction::{Data, Mempool, Transaction},
+        };
         use ed25519_dalek_blake2b::Keypair;
-        use hex::ToHex;
         use rand::rngs::OsRng;
         use std::error::Error;
 
@@ -515,7 +523,7 @@ pub mod transaction {
                 Data::CreateUserAccount {
                     public_key: "skylar".to_string(),
                 },
-                &k1.public.encode_hex::<String>(),
+                &public_key_to_string(&k1.public),
                 0,
                 &k1,
             )?;
@@ -524,7 +532,7 @@ pub mod transaction {
                 Data::CreateUserAccount {
                     public_key: "walter".to_string(),
                 },
-                &k2.public.encode_hex::<String>(),
+                &public_key_to_string(&k2.public),
                 1,
                 &k2,
             )?;
@@ -702,7 +710,7 @@ pub mod block {
         fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>> {
             let input = serde_json::to_string(self)?;
             let h = crate::blockchain::hash::hash(HashFunction::new(), &input);
-            Ok(hex::encode(h))
+            Ok(hash::encode_hash(&h))
         }
     }
 }
@@ -919,10 +927,10 @@ impl WorldState for Blockchain {
 mod test {
     use crate::blockchain::{
         Blockchain,
+        ed25519::public_key_to_string,
         transaction::{Data, Transaction},
     };
     use ed25519_dalek_blake2b::Keypair;
-    use hex::ToHex;
     use rand::rngs::OsRng;
     use std::error::Error;
 
@@ -933,7 +941,7 @@ mod test {
         for n in 0..1 {
             let keys = Keypair::generate(&mut OsRng);
 
-            let pk: String = keys.public.encode_hex();
+            let pk = public_key_to_string(&keys.public);
             let t = Transaction::sign(
                 Data::CreateUserAccount {
                     public_key: pk.clone(),
