@@ -1,5 +1,5 @@
 use crate::{
-    INVALID_MESSAGE_THRESHOLD,
+    INITIAL_PEER_SCORE, INVALID_MESSAGE_THRESHOLD,
     blockchain::Blockchain,
     time::{Timestamp, now_unix},
 };
@@ -22,18 +22,33 @@ pub struct State {
     pub blockchain: Blockchain,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
     pub first_seen: Option<Timestamp>,
     pub last_seen: Option<Timestamp>,
     pub session_count: u32,
     pub blacklisted: bool,
     pub invalid_message_count: u32,
+    pub application_score: f64,
 }
 
 impl PeerInfo {
     pub fn is_malicious(&self) -> bool {
+        // adapt to use application score
         self.invalid_message_count >= INVALID_MESSAGE_THRESHOLD
+    }
+}
+
+impl Default for PeerInfo {
+    fn default() -> Self {
+        Self {
+            first_seen: None,
+            last_seen: None,
+            session_count: 0,
+            blacklisted: false,
+            invalid_message_count: 0,
+            application_score: INITIAL_PEER_SCORE,
+        }
     }
 }
 
