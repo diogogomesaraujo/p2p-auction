@@ -15,6 +15,11 @@ use serde_json::from_slice;
 use std::error::Error;
 use tracing::{error, info, warn};
 
+// implement security context
+// trust_table / seen_ids
+// (later bounded LRU / Bloom filter and persist `trust` across restarts)
+// is_duplicate() / is_seen()
+
 /// Struct that represents the `libp2p` primitives used to construct the DHT.
 #[derive(NetworkBehaviour)]
 #[behaviour(to_swarm = "DhtBehaviourEvent")]
@@ -72,6 +77,9 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
+                // Add sybil / spoofing mitigation
+                // refuse connections from blacklisted peers
+
                 let now = now_unix()?;
 
                 let entry = runtime.state.peers.entry(peer_id).or_default();
@@ -299,11 +307,23 @@ impl DhtBehaviourEvent {
             })) => {
                 let t = message.topic.as_str();
 
+                // check if propagation source is blacklisted. If so, ignore
+                // prevents eclipse
+
+                // detect duplicate / replay
+                // duplicate message id -> payload was already processed
+
+                // prevent premptively unhandled / unsubscribed topics
+                // might be a sign of probing / flooding attack
+
+                // at last if message passes through mark seen
+
                 info!(
                     "Received gossip message from {:?}, id {:?}, topic {}",
                     propagation_source, message_id, t
                 );
 
+                // topic specific validation and trust feedback
                 match t {
                     topic::TRANSACTIONS => match from_slice::<Transaction>(&message.data) {
                         Ok(msg) => {
@@ -312,11 +332,15 @@ impl DhtBehaviourEvent {
                                 message.data.len(),
                                 propagation_source
                             );
+
+                            // reward before processing so a valid-but-locally-rejected tx doesn't punish a honest peer
+
                             if let Err(e) = runtime.submit_transaction(msg) {
                                 error!("Failed to process gossiped transaction: {e}");
                             }
                         }
                         Err(e) => error!("Invalid transaction payload: {e}"),
+                        // penalize and evict blacklisted
                     },
 
                     topic::BLOCKS => match from_slice::<Block>(&message.data) {
@@ -326,6 +350,8 @@ impl DhtBehaviourEvent {
                                 message.data.len(),
                                 propagation_source
                             );
+
+                            // reward
                             if let Err(e) = runtime.accept_block(msg) {
                                 error!(
                                     "Failed to process gossiped block from {:?}: {e}",
@@ -334,6 +360,7 @@ impl DhtBehaviourEvent {
                             }
                         }
                         Err(e) => error!("Invalid block payload: {e}"),
+                        // penalize and evict blacklisted
                     },
 
                     _ => {

@@ -144,7 +144,7 @@ pub mod pow {
     }
 }
 
-/// Module that defines the merkle tree structure for lightweight transaction verification
+/// Module that defines the merkle tree structure for lightweight transaction verification.
 pub mod merkle {
     use crate::blockchain::{
         HashFunction,
@@ -164,7 +164,7 @@ pub mod merkle {
     /// one per tree level, where each entry is the sibling hash needed to recompute the root.
     type Proof = Vec<(String, Side)>;
 
-    /// Function that returns the Merkle root of a given set of transactions
+    /// Function that returns the Merkle root of a given set of transactions.
     pub fn root<T: Hashable>(t: &[T]) -> Result<String, Box<dyn Error + Send + Sync>> {
         if t.is_empty() {
             return Err("Cannot build Merkle root from empty transaction list.".into());
