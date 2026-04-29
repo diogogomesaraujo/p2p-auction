@@ -1,3 +1,4 @@
+
 valid transaction (ok(msg)) +
 invalid transaction payload -
 valid block (gossip accepted) +
@@ -6,4 +7,17 @@ malformed block payload (!!) -
 slow peer event (make it depend on n failed messages) -
 ping failure / exceed timeout -
 
-make an adjust score funct
+score, blacklist, remove
+
+do the handling in behaviour
+
+create strucutres and api for gossip with params and threasholds based on an actual protocol
+
+rpc:
+    - account_info
+    - create_account
+    - transfer_funds
+    - account_balance
+    - account_history
+    - transaction_block (find the block where a transaction occured)
+    - transaction_proof (using merkle tree to return merkle proof)

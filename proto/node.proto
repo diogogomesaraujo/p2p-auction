@@ -1,2 +1,6 @@
 syntax = "proto3";
 package blockchain;
+
+message CreateAccountMessage {
+  string public_key = 1;
+}

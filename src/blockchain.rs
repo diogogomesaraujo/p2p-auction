@@ -9,11 +9,8 @@
 //! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e);
 //! - [Merkle Tree in Blockchain Implementation](https://dsvynarenko.hashnode.dev/designing-blockchain-4-merkle-trees-and-state-verification).
 
-use crate::blockchain::{
-    account::Account, block::Block, ed25519::string_to_public_key, transaction::Mempool,
-};
+use crate::blockchain::{account::Account, block::Block, transaction::Mempool};
 use blake2::Blake2b512;
-use ed25519_dalek_blake2b::Signature;
 use std::{collections::HashMap, error::Error};
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
@@ -307,7 +304,7 @@ pub mod transaction {
         time::{Timestamp, now_unix},
     };
     use blake2::Digest;
-    use ed25519_dalek_blake2b::{Keypair, Signature, Signer, Verifier};
+    use ed25519_dalek_blake2b::{Keypair, Signer, Verifier};
     use hex::ToHex;
     use serde::{Deserialize, Serialize};
     use std::{collections::HashMap, error::Error};
@@ -328,7 +325,6 @@ pub mod transaction {
     pub enum Data {
         CreateUserAccount {
             public_key: String,
-            signature: String,
         },
         ChangeStoreValue {
             key: String,
@@ -352,15 +348,14 @@ pub mod transaction {
             record: Data,
             from: String,
             nonce: u32,
-            keys: &Keypair,
+            signature: &str,
         ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-            let signature = Self::sign(&record, &from, &nonce, &keys)?;
             Ok(Self {
                 record,
                 from,
                 created_at: now_unix()?,
                 nonce,
-                signature,
+                signature: signature.to_string(),
             })
         }
 
@@ -379,21 +374,26 @@ pub mod transaction {
         }
 
         /// Function that signs the parameters used to construct a transaction.
-        fn sign(
-            record: &Data,
-            from: &String,
-            nonce: &u32,
+        pub fn sign(
+            record: Data,
+            from: &str,
+            nonce: u32,
             keys: &Keypair,
-        ) -> Result<String, Box<dyn Error + Send + Sync>> {
-            let input = Self::serialize(record, from, nonce)?;
-            let signature = keys.sign(input.as_bytes());
-            Ok(signature.encode_hex())
+        ) -> Result<Transaction, Box<dyn Error + Send + Sync>> {
+            let input = Self::serialize(&record, &from.to_string(), &nonce)?;
+            let signature: String = keys.sign(input.as_bytes()).encode_hex();
+            Ok(Transaction::new(
+                record,
+                from.to_string(),
+                nonce,
+                &signature,
+            )?)
         }
 
         /// Function that verifies the validity of a transaction.
         pub fn verify(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
             let pk = string_to_public_key(&self.from)?;
-            let signature = match Signature::from_bytes(&hex::decode(&self.signature)?) {
+            let signature = match string_to_signature(&self.signature) {
                 Ok(s) => s,
                 _ => return Err("Malformed signature.".into()),
             };
@@ -416,10 +416,7 @@ pub mod transaction {
             blockchain: &mut Blockchain,
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
             match &self.record {
-                Data::CreateUserAccount {
-                    public_key,
-                    signature,
-                } => blockchain.create_account(public_key, &string_to_signature(signature)?)?,
+                Data::CreateUserAccount { public_key } => blockchain.create_account(public_key)?,
                 Data::TransferTokens { from, to, amount } => {
                     blockchain.transfer_funds(from, to, *amount)?
                 }
@@ -500,11 +497,8 @@ pub mod transaction {
 
     #[cfg(test)]
     pub mod test {
-        use crate::blockchain::{
-            Blockchain, WorldState,
-            transaction::{Data, Mempool, Transaction},
-        };
-        use ed25519_dalek_blake2b::{Keypair, Signer};
+        use crate::blockchain::transaction::{Data, Mempool, Transaction};
+        use ed25519_dalek_blake2b::Keypair;
         use hex::ToHex;
         use rand::rngs::OsRng;
         use std::error::Error;
@@ -513,28 +507,23 @@ pub mod transaction {
             let k1 = Keypair::generate(&mut OsRng);
             let k2 = Keypair::generate(&mut OsRng);
 
-            let sig1 = k1.sign(Blockchain::CREATE_ACCOUNT_MESSAGE.as_bytes());
-            let sig2 = k2.sign(Blockchain::CREATE_ACCOUNT_MESSAGE.as_bytes());
-
-            let t1 = {
-                let data = Data::CreateUserAccount {
+            let t1 = Transaction::sign(
+                Data::CreateUserAccount {
                     public_key: "skylar".to_string(),
-                    signature: sig1.encode_hex(),
-                };
-                let from = k2.public.encode_hex();
-                let nonce = 0;
-                Transaction::new(data, from, nonce, &k1)?
-            };
+                },
+                &k1.public.encode_hex::<String>(),
+                0,
+                &k1,
+            )?;
 
-            let t2 = {
-                let data = Data::CreateUserAccount {
-                    public_key: "walpublic_keyter".to_string(),
-                    signature: sig2.encode_hex(),
-                };
-                let from = k1.public.encode_hex();
-                let nonce = 0;
-                Transaction::new(data, from, nonce, &k2)?
-            };
+            let t2 = Transaction::sign(
+                Data::CreateUserAccount {
+                    public_key: "walter".to_string(),
+                },
+                &k2.public.encode_hex::<String>(),
+                1,
+                &k2,
+            )?;
 
             let mut pool = Mempool::new();
             pool.add_transaction(t1.clone())?;
@@ -859,24 +848,11 @@ pub trait WorldState {
     fn get_account_by_id_mut(&mut self, public_key: &str) -> Option<&mut Account>;
 
     /// Will add a new account
-    fn create_account(
-        &mut self,
-        public_key: &str,
-        signature: &Signature,
-    ) -> Result<(), Box<dyn Error + Send + Sync>>;
+    fn create_account(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
 
 impl WorldState for Blockchain {
-    fn create_account(
-        &mut self,
-        public_key: &str,
-        signature: &Signature,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let pk = string_to_public_key(public_key)?;
-        if let Err(_) = pk.verify_strict(Blockchain::CREATE_ACCOUNT_MESSAGE.as_bytes(), signature) {
-            return Err("The signature is not verifiable by the public key.".into());
-        }
-
+    fn create_account(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.accounts.insert(
             public_key.to_string(),
             Account::new(account::Kind::User, public_key.to_string())?,
@@ -940,10 +916,10 @@ impl WorldState for Blockchain {
 #[cfg(test)]
 mod test {
     use crate::blockchain::{
-        Blockchain, WorldState,
+        Blockchain,
         transaction::{Data, Transaction},
     };
-    use ed25519_dalek_blake2b::{Keypair, Signer};
+    use ed25519_dalek_blake2b::Keypair;
     use hex::ToHex;
     use rand::rngs::OsRng;
     use std::error::Error;
@@ -956,23 +932,16 @@ mod test {
             let keys = Keypair::generate(&mut OsRng);
 
             let pk: String = keys.public.encode_hex();
+            let t = Transaction::sign(
+                Data::CreateUserAccount {
+                    public_key: pk.clone(),
+                },
+                &pk,
+                n,
+                &keys,
+            )?;
 
-            let sig = keys.sign(Blockchain::CREATE_ACCOUNT_MESSAGE.as_bytes());
-
-            for _ in 0..100 {
-                blockchain
-                    .transaction_mempool
-                    .add_transaction(Transaction::new(
-                        Data::CreateUserAccount {
-                            public_key: pk.clone(),
-                            signature: sig.encode_hex(),
-                        },
-                        pk.clone(),
-                        n,
-                        &keys,
-                    )?)?;
-            }
-
+            blockchain.transaction_mempool.add_transaction(t)?;
             blockchain.propose_block(pk)?;
         }
 
