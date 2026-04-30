@@ -1,28 +1,10 @@
+each node has its own mempool/cache and proposes the blocks himself
+longest chain like bitcoin (to handle forks -> smallest hash)
+only recognize a transaction is executed after 8 blocks are in front.
+no money only bids (start/stop auction, bid)
 
-valid transaction (ok(msg)) +
-invalid transaction payload -
-valid block (gossip accepted) +
-block rejected by accept_block-
-malformed block payload (!!) -
-slow peer event (make it depend on n failed messages) -
-ping failure / exceed timeout -
 
-score, blacklist, remove
-
-do the handling in behaviour
-
-create strucutres and api for gossip with params and threasholds based on an actual protocol
-
-rpc:
-    - account_info
-    - create_account
-    - transfer_funds
-    - account_balance
-    - account_history
-    - transaction_block (find the block where a transaction occured)
-    - transaction_proof (using merkle tree to return merkle proof)
-
-how can an entering node get the correct blockchain?
-
-when a miner discovers a block it multicasts a hault requests with the proposed block and if the puzzle is correct
-the nodes accept the vote and decide on the block that will be added to the chain.
+dht:
+blockchain on join -> boot node gives the chain
+delete all logic regarding stores store
+dht for peer discovery
