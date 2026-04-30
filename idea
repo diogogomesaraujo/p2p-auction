@@ -1,4 +1,6 @@
 each node has its own mempool/cache and proposes the blocks himself
+(should mempool/cache really be a hashmap ordered by timestamp?)
+
 longest chain like bitcoin (to handle forks -> smallest hash)
 only recognize a transaction is executed after 8 blocks are in front.
 no money only bids (start/stop auction, bid)

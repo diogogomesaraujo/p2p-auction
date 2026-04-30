@@ -1,19 +1,15 @@
 use crate::{
-    QUORUM,
     behaviour::DhtBehaviour,
     rpc::{DhtRpc, LISTEN_ON},
     runtime::Runtime,
     state::State,
-    topic::topic,
+    topic,
 };
 use async_trait::async_trait;
 use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
     identity::Keypair,
-    kad::{
-        self, Caching, Config, K_VALUE, KBucketKey, Mode, Quorum, Record, RecordKey,
-        store::MemoryStore,
-    },
+    kad::{self, Caching, Config, K_VALUE, KBucketKey, Mode, store::MemoryStore},
     noise, ping, tcp, yamux,
 };
 use libp2p_gossipsub::{
@@ -24,7 +20,6 @@ use std::{
     collections::hash_map::DefaultHasher,
     error::Error,
     hash::{Hash, Hasher},
-    num::NonZeroUsize,
     str::SplitWhitespace,
     time::Duration,
 };
@@ -36,11 +31,7 @@ pub struct Node {
 
 pub enum RpcAction {
     Ping,
-    Store,
     FindNode,
-    FindValue,
-    StartProviding,
-    FindProviders,
     RoutingTable,
     ConnectedPeers,
 }
@@ -58,11 +49,7 @@ impl DhtRpc for Node {
     fn action_from_str(action_text: &str) -> Option<Self::RpcAction> {
         match action_text {
             "PING" => Some(RpcAction::Ping),
-            "STORE" => Some(RpcAction::Store),
-            "FIND_VALUE" => Some(RpcAction::FindValue),
             "FIND_NODE" => Some(RpcAction::FindNode),
-            "START_PROVIDING" => Some(RpcAction::StartProviding),
-            "FIND_PROVIDERS" => Some(RpcAction::FindProviders),
             "ROUTING_TABLE" => Some(RpcAction::RoutingTable),
             "CONNECTED_PEERS" => Some(RpcAction::ConnectedPeers),
             _ => None,
@@ -183,10 +170,6 @@ impl DhtRpc for Node {
                 // };
 
                 peer_score.topics.insert(
-                    gossipsub::IdentTopic::new(topic::TRANSACTIONS).hash(),
-                    topic_score.clone(),
-                );
-                peer_score.topics.insert(
                     gossipsub::IdentTopic::new(topic::BLOCKS).hash(),
                     topic_score,
                 );
@@ -204,7 +187,6 @@ impl DhtRpc for Node {
 
                 gossip.with_peer_score(peer_score, thresholds)?;
 
-                gossip.subscribe(&IdentTopic::new(topic::TRANSACTIONS))?;
                 gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
 
                 Ok(DhtBehaviour {
@@ -244,58 +226,9 @@ impl DhtRpc for Node {
                 runtime.swarm.dial(address)?;
             }
 
-            RpcAction::Store => {
-                let key_text = Self::arg_parse(args)?;
-                let value_text = Self::remaining_args(args)?;
-                let key = RecordKey::new(&key_text);
-                let value = value_text.as_bytes().to_vec();
-
-                let quorum = QUORUM;
-
-                let record = Record {
-                    key: key.clone(),
-                    value: value.clone(),
-                    publisher: None,
-                    expires: None,
-                };
-
-                runtime.swarm.behaviour_mut().kad.put_record(
-                    record,
-                    Quorum::N(NonZeroUsize::new(quorum).ok_or("Quorum must be greater than zero")?),
-                )?;
-
-                runtime
-                    .state
-                    .local
-                    .remember_value_record(key.to_vec(), value, quorum)?;
-                runtime.state.local.save()?;
-            }
-
             RpcAction::FindNode => {
                 let peer = Self::arg_parse(args)?.parse::<PeerId>()?;
                 runtime.swarm.behaviour_mut().kad.get_closest_peers(peer);
-            }
-
-            RpcAction::FindValue => {
-                let key = RecordKey::new(&Self::arg_parse(args)?);
-                runtime.swarm.behaviour_mut().kad.get_record(key);
-            }
-
-            RpcAction::StartProviding => {
-                let key = RecordKey::new(&Self::arg_parse(args)?);
-                runtime
-                    .swarm
-                    .behaviour_mut()
-                    .kad
-                    .start_providing(key.clone())?;
-
-                runtime.state.local.remember_provider_record(key.to_vec())?;
-                runtime.state.local.save()?;
-            }
-
-            RpcAction::FindProviders => {
-                let key = RecordKey::new(&Self::arg_parse(args)?);
-                runtime.swarm.behaviour_mut().kad.get_providers(key);
             }
 
             RpcAction::ConnectedPeers => {

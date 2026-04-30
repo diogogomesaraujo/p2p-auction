@@ -2,15 +2,12 @@ use crate::{
     behaviour::DhtBehaviour,
     blockchain::{block::Block, transaction::Transaction},
     state::State,
-    topic,
+    topic::BLOCKS,
 };
-use libp2p::{
-    PeerId, Swarm,
-    kad::{Quorum, Record, RecordKey},
-};
+use libp2p::{PeerId, Swarm};
 use libp2p_gossipsub::IdentTopic;
 use serde_json::to_vec;
-use std::{error::Error, num::NonZeroUsize};
+use std::error::Error;
 
 pub struct Runtime {
     pub swarm: Swarm<DhtBehaviour>,
@@ -23,23 +20,22 @@ impl Runtime {
     }
 
     /// Function validates and appends to chain a block received over gossip protocol.
-    /// If the block is valid it is gossiped along
+    /// If the block is valid it gossips the block.
     pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
         self.state.blockchain.accept_block(block.clone())?;
         self.swarm
             .behaviour_mut()
             .gossip
-            .publish(IdentTopic::new(topic::topic::BLOCKS), to_vec(&block)?)?;
+            .publish(IdentTopic::new(BLOCKS), to_vec(&block)?)?;
         Ok(())
     }
 
-    /// Validates and adds a transaction to the mempool, then gossips it to peers.
+    /// Validates and adds a transaction to the mempool.
     pub fn submit_transaction(
         &mut self,
         transaction: Transaction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         transaction.verify()?;
-
         if !self
             .state
             .blockchain
@@ -50,68 +46,45 @@ impl Runtime {
                 .blockchain
                 .transaction_pool
                 .add_transaction(transaction.clone())?;
-
-            self.swarm.behaviour_mut().gossip.publish(
-                IdentTopic::new(topic::topic::TRANSACTIONS),
-                to_vec(&transaction)?,
-            )?;
         }
-
         Ok(())
     }
 
-    /// Function that adjust a peer's application score by a given delta.
-    /// If state doesn't currently have an entry for the given peer it initializes
-    /// it with default values and adjusts the application score by the delta.
+    /// Adjusts a peer's application score by a given delta and syncs it into gossipsub.
     pub fn adjust_score(
         &mut self,
-        peer_id: PeerId,
+        peer_id: &PeerId,
         delta: f64,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let entry = self.state.peers.entry(peer_id).or_default();
-        entry.application_score = entry.application_score + delta;
+        let entry = self.state.peers.entry(peer_id.clone()).or_default();
+        entry.application_score += delta;
         self.swarm
             .behaviour_mut()
             .gossip
-            .set_application_score(&peer_id, entry.application_score);
+            .set_application_score(peer_id, entry.application_score);
         Ok(())
     }
 
+    /// Replays persistent blacklist into gossipsub and bootstraps Kademlia.
     pub fn load_from_local(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        for rec in &self.state.local.value_records {
-            let quorum = match NonZeroUsize::new(rec.quorum) {
-                Some(q) => q,
-                None => return Err("Stored quorum must be greater than zero".into()),
-            };
+        let blacklisted: Vec<PeerId> = self
+            .state
+            .peers
+            .iter()
+            .filter_map(|(id, info)| {
+                if info.blacklisted {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-            let record = Record {
-                key: RecordKey::new(&rec.key),
-                value: rec.value.clone(),
-                publisher: None,
-                expires: None,
-            };
-
-            self.swarm
-                .behaviour_mut()
-                .kad
-                .put_record(record, Quorum::N(quorum))?;
-        }
-
-        for rec in &self.state.local.provider_records {
-            self.swarm
-                .behaviour_mut()
-                .kad
-                .start_providing(RecordKey::new(&rec.key))?;
-        }
-
-        for peer_str in &self.state.local.blacklisted_peers.clone() {
-            let peer_id: PeerId = peer_str.parse()?;
+        for peer_id in blacklisted {
             self.swarm.behaviour_mut().gossip.blacklist_peer(&peer_id);
-            self.state.peers.entry(peer_id).or_default().blacklisted = true;
         }
 
         let _ = self.swarm.behaviour_mut().kad.bootstrap();
-
         Ok(())
     }
 }

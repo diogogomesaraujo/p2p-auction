@@ -1,13 +1,9 @@
 use crate::{
-    blockchain::{block::Block, transaction::Transaction},
-    runtime::Runtime,
-    time::now_unix,
-    topic::topic,
+    PUNISH_MALFORMED_BLOCK, PUNISH_UNACCEPTED_BLOCK, REWARD_VALID_BLOCK, blockchain::block::Block,
+    runtime::Runtime, time::now_unix, topic,
 };
 use libp2p::{
-    identify,
-    kad::{self, GetRecordOk, PeerRecord, Record},
-    ping,
+    identify, kad, ping,
     swarm::{NetworkBehaviour, SwarmEvent},
 };
 use libp2p_gossipsub::{self as gossipsub};
@@ -72,9 +68,6 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                // GossipSub handles blacklisted peers in runtime automatically. So connections are silently refused.
-                //
-                // Explicitely blacklist peer if it is in the persistent state's blacklist
                 if runtime
                     .state
                     .peers
@@ -212,69 +205,7 @@ impl DhtBehaviourEvent {
                             error!("Couldn't find the node at {:?}.", err.key());
                         }
 
-                        kad::QueryResult::GetProviders(Ok(ok)) => match ok {
-                            kad::GetProvidersOk::FoundProviders { key, providers } => {
-                                info!("Providers for {:?}: {:?}", key, providers);
-                            }
-                            kad::GetProvidersOk::FinishedWithNoAdditionalRecord {
-                                closest_peers,
-                            } => {
-                                info!(
-                                    "No more providers found. Closest peers: {:?}",
-                                    closest_peers
-                                );
-                            }
-                        },
-                        kad::QueryResult::GetProviders(Err(err)) => {
-                            error!("GetProviders failed: {:?}", err);
-                        }
-
-                        kad::QueryResult::StartProviding(Ok(ok)) => {
-                            info!("Started providing key {:?}", ok.key);
-                        }
-                        kad::QueryResult::StartProviding(Err(err)) => {
-                            error!("StartProviding failed: {:?}", err);
-                        }
-
-                        kad::QueryResult::RepublishProvider(Ok(ok)) => {
-                            info!("Republished provider record for key {:?}", ok.key);
-                        }
-                        kad::QueryResult::RepublishProvider(Err(err)) => {
-                            error!("RepublishProvider failed: {:?}", err);
-                        }
-
-                        kad::QueryResult::GetRecord(Ok(GetRecordOk::FoundRecord(PeerRecord {
-                            record: Record { key, value, .. },
-                            ..
-                        }))) => {
-                            info!(
-                                "Successfully found value {} at {:?}.",
-                                String::from_utf8(value)?,
-                                key,
-                            );
-                        }
-                        kad::QueryResult::GetRecord(Ok(
-                            GetRecordOk::FinishedWithNoAdditionalRecord { .. },
-                        )) => {
-                            info!("GetRecord finished without additional records.");
-                        }
-                        kad::QueryResult::GetRecord(Err(err)) => {
-                            error!("Failed to find value at {:?}.", err.key());
-                        }
-
-                        kad::QueryResult::PutRecord(Ok(ok)) => {
-                            info!("Successfully stored the value at {:?}", ok.key);
-                        }
-                        kad::QueryResult::PutRecord(Err(err)) => {
-                            error!("PutRecord failed: {:?}", err);
-                        }
-
-                        kad::QueryResult::RepublishRecord(Ok(ok)) => {
-                            info!("Republished record at {:?}", ok.key);
-                        }
-                        kad::QueryResult::RepublishRecord(Err(err)) => {
-                            error!("RepublishRecord failed: {:?}", err);
-                        }
+                        _ => {}
                     }
                 }
             },
@@ -317,58 +248,14 @@ impl DhtBehaviourEvent {
                 message_id,
                 message,
             })) => {
-                let t = message.topic.as_str();
-
-                // GossipSub automatically rejects messages on unsubscribed topics (prevents probing/flooding)
-
+                let topic = message.topic.as_str();
                 info!(
                     "Received gossip message from {:?}, id {:?}, topic {}",
-                    propagation_source, message_id, t
+                    propagation_source, message_id, topic
                 );
 
-                match t {
-                    topic::TRANSACTIONS => {
-                        match from_slice::<Transaction>(&message.data) {
-                            Ok(msg) => {
-                                info!(
-                                    "Received transaction gossip ({} bytes) from {:?}.",
-                                    message.data.len(),
-                                    propagation_source
-                                );
-
-                                // Reward honest peer before processing so a valid-but-locally-rejected
-                                // tx does not punish an honest peer.
-
-                                if let Err(e) = runtime.submit_transaction(msg) {
-                                    error!("Failed to process gossiped transaction: {e}");
-                                }
-                            }
-                            Err(e) => {
-                                // Might need to penalize explicitely
-                                error!("Invalid transaction payload: {e}");
-                                let Some(entry) = runtime.state.peers.get_mut(&propagation_source)
-                                else {
-                                    return Err(format!("Unknown peer {propagation_source:?} sent invalid transaction").into());
-                                };
-                                entry.invalid_message_count =
-                                    entry.invalid_message_count.saturating_add(1);
-                                if entry.invalid_message_count >= 5 {
-                                    entry.blacklisted = true;
-                                    runtime.state.local.blacklist_peer(&propagation_source);
-                                    runtime.state.local.save()?;
-                                    runtime
-                                        .swarm
-                                        .behaviour_mut()
-                                        .gossip
-                                        .blacklist_peer(&propagation_source);
-                                    warn!("Blacklisted malicious peer {:?}", propagation_source);
-                                }
-                            }
-                        }
-                    }
-
-                    // For Blocks do a simmilar logic
-                    topic::BLOCKS => match from_slice::<Block>(&message.data) {
+                if topic == topic::BLOCKS {
+                    match from_slice::<Block>(&message.data) {
                         Ok(msg) => {
                             info!(
                                 "Received block gossip ({} bytes) from {:?}.",
@@ -381,13 +268,16 @@ impl DhtBehaviourEvent {
                                     "Failed to process gossiped block from {:?}: {e}",
                                     propagation_source
                                 );
+                                runtime
+                                    .adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)?;
+                            } else {
+                                runtime.adjust_score(&propagation_source, REWARD_VALID_BLOCK)?;
                             }
                         }
-                        Err(e) => error!("Invalid block payload: {e}"),
-                    },
-
-                    _ => {
-                        info!("Received message for unknown topic {}", t);
+                        Err(e) => {
+                            error!("Invalid block payload: {e}");
+                            runtime.adjust_score(&propagation_source, PUNISH_MALFORMED_BLOCK)?;
+                        }
                     }
                 }
             }
@@ -414,12 +304,6 @@ impl DhtBehaviourEvent {
                     "Slow peer {:?}: {:?} failed messages — penalising",
                     peer_id, failed_messages
                 );
-                // // decide application_score along with gossip configuration
-                // runtime
-                //     .swarm
-                //     .behaviour_mut()
-                //     .gossip
-                //     .set_application_score(&peer_id, ());
             }
 
             _ => {}
