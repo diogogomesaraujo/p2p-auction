@@ -60,7 +60,7 @@ impl Runtime {
         peer_id: &PeerId,
         delta: f64,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let entry = self.state.peers.entry(*peer_id).or_default();
+        let entry = self.state.peers.entry(peer_id.clone()).or_default();
         entry.application_score += delta;
         self.swarm
             .behaviour_mut()
@@ -75,7 +75,13 @@ impl Runtime {
             .state
             .peers
             .iter()
-            .filter_map(|(id, info)| if info.blacklisted { Some(*id) } else { None })
+            .filter_map(|(id, info)| {
+                if info.blacklisted {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
 
         for peer_id in blacklisted {
