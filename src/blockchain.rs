@@ -9,9 +9,13 @@
 //! - [Transaction Mempool](https://medium.com/coinmonks/creating-a-blockchain-part-6-transaction-mempool-and-tx-encoding-a1581479449e);
 //! - [Merkle Tree in Blockchain Implementation](https://dsvynarenko.hashnode.dev/designing-blockchain-4-merkle-trees-and-state-verification).
 
-use crate::blockchain::{account::Account, block::Block, transaction::Mempool};
+use crate::blockchain::{account::Account, block::Block, transaction::TransactionPool};
 use blake2::Blake2b512;
-use std::{collections::HashMap, error::Error};
+use num_bigint::BigUint;
+use std::{
+    collections::{HashMap, HashSet},
+    error::Error,
+};
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
 ///
@@ -447,13 +451,13 @@ pub mod transaction {
 
     /// Type that implements the queue of transactions to be executed and published as a block,
     /// constructed from the mempool and sorted by timestamp.
-    pub type Memqueue = Vec<Transaction>;
+    pub type TransactionQueue = Vec<Transaction>;
 
     /// Struct that temporarily holds unexecuted transactions mapped by timestamp.
-    #[derive(Debug, Clone)]
-    pub struct Mempool(HashMap<Timestamp, Transaction>);
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct TransactionPool(HashMap<Timestamp, Transaction>);
 
-    impl Mempool {
+    impl TransactionPool {
         /// Function that creates an empty mempool.
         pub fn new() -> Self {
             Self(HashMap::new())
@@ -465,13 +469,13 @@ pub mod transaction {
         }
 
         /// Function that sorts the mempool by timestamp mapping it to a queue of transactions,
-        fn to_sorted_queue(self) -> Memqueue {
+        fn to_sorted_queue(self) -> TransactionQueue {
             let mut v = self
                 .0
                 .into_iter()
                 .collect::<Vec<(Timestamp, Transaction)>>();
             v.sort_by(|a, b| a.0.cmp(&b.0));
-            v.into_iter().map(|(_, t)| t).collect::<Memqueue>()
+            v.into_iter().map(|(_, t)| t).collect::<TransactionQueue>()
         }
 
         /// Function that gets the current length of the mempool.
@@ -493,7 +497,7 @@ pub mod transaction {
         }
 
         /// Function that flushes the current mempool and returns a queue sorted by timestamp.
-        pub fn flush(&mut self) -> Memqueue {
+        pub fn flush(&mut self) -> TransactionQueue {
             let memqueue = self.clone().to_sorted_queue();
             *self = Self::new();
             memqueue
@@ -509,7 +513,7 @@ pub mod transaction {
     pub mod test {
         use crate::blockchain::{
             ed25519::public_key_to_string,
-            transaction::{Data, Mempool, Transaction},
+            transaction::{Data, Transaction, TransactionPool},
         };
         use ed25519_dalek_blake2b::Keypair;
         use rand::rngs::OsRng;
@@ -537,7 +541,7 @@ pub mod transaction {
                 &k2,
             )?;
 
-            let mut pool = Mempool::new();
+            let mut pool = TransactionPool::new();
             pool.add_transaction(t1.clone())?;
             pool.add_transaction(t2.clone())?;
 
@@ -558,7 +562,7 @@ pub mod account {
     const INITIAL_TOKEN_COUNT: u64 = 5;
 
     /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct Account {
         pub kind: Kind,
         pub tokens: u64,
@@ -567,7 +571,7 @@ pub mod account {
     }
 
     /// Enum that represents the types of accounts that can be created in the blockchain.
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub enum Kind {
         User,
     }
@@ -639,7 +643,7 @@ pub mod block {
     }
 
     /// Struct that defines a published block.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
     pub struct Block {
         pub previous_hash: String,
         pub transactions: Vec<Transaction>,
@@ -716,11 +720,11 @@ pub mod block {
 }
 
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Blockchain {
     pub blocks: Vec<Block>,
     pub accounts: HashMap<String, Account>,
-    pub transaction_mempool: Mempool,
+    pub transaction_pool: TransactionPool,
     pub difficulty: u32,
 }
 
@@ -729,7 +733,7 @@ impl Blockchain {
     pub fn new(difficulty: u32) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             accounts: HashMap::new(),
-            transaction_mempool: Mempool::new(),
+            transaction_pool: TransactionPool::new(),
             blocks: vec![],
             difficulty,
         })
@@ -751,8 +755,8 @@ impl Blockchain {
 
     pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
         if !block.transactions.iter().fold(true, |acc, t| {
-            let has = self.transaction_mempool.contains(t);
-            self.transaction_mempool.remove(t.created_at);
+            let has = self.transaction_pool.contains(t);
+            self.transaction_pool.remove(t.created_at);
             acc && has
         }) {
             return Err(
@@ -783,7 +787,7 @@ impl Blockchain {
         &mut self,
         public_key: String,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let transactions = self.transaction_mempool.flush();
+        let transactions = self.transaction_pool.flush();
 
         if transactions.len() == 0 {
             return Err(
@@ -831,6 +835,65 @@ impl Blockchain {
             previous_hash = block.hash.clone();
         }
         Ok(true)
+    }
+
+    fn hash_chain(&self) -> Vec<(String, String)> {
+        self.blocks
+            .iter()
+            .map(|b| (b.previous_hash.clone(), b.hash.clone()))
+            .collect()
+    }
+
+    fn choose_hash(h1: &str, h2: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
+        let h1b = BigUint::from_bytes_le(&hex::decode(h1)?);
+        let h2b = BigUint::from_bytes_le(&hex::decode(h2)?);
+
+        assert_eq!(h1b.to_str_radix(16), h1);
+
+        match h1b < h2b {
+            true => Ok(h1.to_string()),
+            false => Ok(h2.to_string()),
+        }
+    }
+
+    pub fn fix(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // break the chain
+        let mut map: HashMap<String, String> = HashMap::new();
+        let chain = self.hash_chain();
+        chain
+            .iter()
+            .try_for_each(|(prev_h, h)| -> Result<(), Box<dyn Error + Send + Sync>> {
+                if let Some((_, h_temp)) = chain
+                    .iter()
+                    .find(|(prev_h_temp, h_temp)| prev_h_temp == prev_h_temp && h != h_temp)
+                {
+                    map.insert(prev_h.clone(), Self::choose_hash(h, h_temp)?);
+                }
+                Ok(())
+            })?;
+
+        // remove branches
+
+        let mut prev_hash = "0";
+        let mut new_chain = HashSet::new();
+
+        new_chain.insert(prev_hash.to_string());
+
+        while let Some(h) = map.get(prev_hash) {
+            new_chain.insert(h.clone());
+            prev_hash = h;
+        }
+
+        // reconstruct blockchain
+
+        self.blocks = self
+            .blocks
+            .clone() // super not chill
+            .into_iter()
+            .filter(|b| new_chain.contains(&b.hash))
+            .collect();
+
+        Ok(())
     }
 }
 
@@ -927,6 +990,7 @@ impl WorldState for Blockchain {
 mod test {
     use crate::blockchain::{
         Blockchain,
+        block::Block,
         ed25519::public_key_to_string,
         transaction::{Data, Transaction},
     };
@@ -951,11 +1015,65 @@ mod test {
                 &keys,
             )?;
 
-            blockchain.transaction_mempool.add_transaction(t)?;
+            blockchain.transaction_pool.add_transaction(t)?;
             blockchain.propose_block(pk)?;
         }
 
+        // verify blockchain
+
         assert!(blockchain.verify()?);
+
+        // verify fix function
+
+        let mut fixed_blockchain = blockchain.clone();
+        fixed_blockchain.fix()?;
+
+        assert_eq!(blockchain, fixed_blockchain);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_blockchain_fix() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut blockchain = Blockchain::new(u32::MAX)?;
+
+        let b1 = Block {
+            previous_hash: "0".to_string(),
+            transactions: vec![],
+            merkle_root: "".to_string(),
+            hash: "11".to_string(),
+            nonce: 0,
+            timestamp: 1,
+            miner: "".to_string(),
+        };
+
+        let b2 = Block {
+            previous_hash: "0".to_string(),
+            transactions: vec![],
+            merkle_root: "".to_string(),
+            hash: "22".to_string(),
+            nonce: 0,
+            timestamp: 1,
+            miner: "".to_string(),
+        };
+
+        let b3 = Block {
+            previous_hash: "22".to_string(),
+            transactions: vec![],
+            merkle_root: "".to_string(),
+            hash: "33".to_string(),
+            nonce: 0,
+            timestamp: 1,
+            miner: "".to_string(),
+        };
+
+        blockchain.blocks.push(b1.clone());
+        blockchain.blocks.push(b2);
+        blockchain.blocks.push(b3);
+
+        blockchain.fix()?;
+
+        assert_eq!(blockchain.blocks, vec![b1]);
 
         Ok(())
     }

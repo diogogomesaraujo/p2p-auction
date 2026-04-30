@@ -43,12 +43,12 @@ impl Runtime {
         if !self
             .state
             .blockchain
-            .transaction_mempool
+            .transaction_pool
             .contains(&transaction)
         {
             self.state
                 .blockchain
-                .transaction_mempool
+                .transaction_pool
                 .add_transaction(transaction.clone())?;
 
             self.swarm.behaviour_mut().gossip.publish(
