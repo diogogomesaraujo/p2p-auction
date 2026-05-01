@@ -818,12 +818,19 @@ impl Blockchain {
 
         // reconstruct blockchain
 
-        self.blocks = self
-            .blocks
-            .clone() // super not chill
-            .into_iter()
-            .filter(|b| new_chain.contains(&b.hash))
-            .collect();
+        self.blocks = self.blocks.iter().try_fold(
+            vec![],
+            |acc, b| -> Result<Vec<Block>, Box<dyn Error + Send + Sync>> {
+                if new_chain.contains(&b.hash) {
+                    Ok([acc, vec![b.clone()]].concat())
+                } else {
+                    b.transactions
+                        .iter()
+                        .try_for_each(|t| self.transaction_pool.add_transaction(t.clone()))?;
+                    Ok(acc)
+                }
+            },
+        )?;
 
         Ok(())
     }
@@ -969,6 +976,15 @@ mod test {
     fn test_blockchain_fix() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut blockchain = Blockchain::new(u32::MAX)?;
 
+        let t1 = Transaction::new(
+            Data::CreateUserAccount {
+                public_key: "skylar".to_string(),
+            },
+            "walter".to_string(),
+            0,
+            "i'm the one who knocks",
+        )?;
+
         let b1 = Block {
             previous_hash: "0".to_string(),
             transactions: vec![],
@@ -991,7 +1007,7 @@ mod test {
 
         let b3 = Block {
             previous_hash: "22".to_string(),
-            transactions: vec![],
+            transactions: vec![t1.clone()],
             merkle_root: "".to_string(),
             hash: "33".to_string(),
             nonce: 0,
@@ -1006,6 +1022,7 @@ mod test {
         blockchain.fix()?;
 
         assert_eq!(blockchain.blocks, vec![b1]);
+        assert_eq!(blockchain.transaction_pool.flush(), vec![t1]);
 
         Ok(())
     }
