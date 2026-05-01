@@ -203,7 +203,7 @@ impl DhtRpc for Node {
                 .behaviour_mut()
                 .kad
                 .add_address(bootstrap_id, bootstrap_addr.clone());
-            swarm.dial(*bootstrap_id)?;
+            swarm.dial(bootstrap_id.clone())?;
         }
 
         swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
