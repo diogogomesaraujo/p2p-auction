@@ -693,6 +693,30 @@ impl Blockchain {
         Ok(())
     }
 
+    fn insert_after(&self) -> Option<String> {
+        let chain = self.hash_chain();
+
+        if chain.len() == 0 {
+            return None;
+        }
+
+        Some(
+            chain[1..]
+                .iter()
+                .fold(chain[0].clone(), |(acc_prev_h, acc_h), (prev_h, h)| {
+                    if prev_h == &acc_prev_h {
+                        (
+                            acc_prev_h,
+                            Self::choose_hash(&acc_h, h).expect("shouldn't fail"),
+                        )
+                    } else {
+                        (prev_h.clone(), h.clone())
+                    }
+                })
+                .1,
+        )
+    }
+
     /// Function that appends a block to the blockchain.
     pub fn propose_block(
         &mut self,
@@ -706,10 +730,7 @@ impl Blockchain {
             );
         }
 
-        let previous_block_hash = match self.blocks.last() {
-            Some(pb) => Some(pb.hash.clone()),
-            None => None,
-        };
+        let previous_block_hash = self.insert_after();
         let block_to_append = Block::new(
             public_key,
             previous_block_hash,
