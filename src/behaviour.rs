@@ -61,7 +61,7 @@ impl From<gossipsub::Event> for DhtBehaviourEvent {
 
 impl DhtBehaviourEvent {
     /// Function that maps types of events to executable actions.
-    pub fn from_event(
+    pub async fn from_event(
         event: SwarmEvent<DhtBehaviourEvent>,
         runtime: &mut Runtime,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -250,7 +250,7 @@ impl DhtBehaviourEvent {
 
                 match from_slice::<Block>(&message.data) {
                     Ok(block) => {
-                        if let Err(e) = runtime.accept_block(block) {
+                        if let Err(e) = runtime.accept_block(block).await {
                             error!("Failed to accept block from {:?}: {e}", propagation_source);
                             runtime.adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)?;
                         } else {

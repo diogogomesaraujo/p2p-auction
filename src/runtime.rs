@@ -23,8 +23,12 @@ impl Runtime {
 
     /// Function validates and appends to chain a block received over gossip protocol.
     /// If the block is valid it gossips the block.
-    pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.state.blockchain.accept_block(block.clone())?;
+    pub async fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.state
+            .blockchain
+            .write()
+            .await
+            .accept_block(block.clone())?;
         self.swarm
             .behaviour_mut()
             .gossip
@@ -33,7 +37,7 @@ impl Runtime {
     }
 
     /// Validates and adds a transaction to the mempool.
-    pub fn submit_transaction(
+    pub async fn submit_transaction(
         &mut self,
         transaction: Transaction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -41,11 +45,15 @@ impl Runtime {
         if !self
             .state
             .blockchain
+            .read()
+            .await
             .transaction_pool
             .contains(&transaction)
         {
             self.state
                 .blockchain
+                .write()
+                .await
                 .transaction_pool
                 .add_transaction(transaction.clone())?;
         }

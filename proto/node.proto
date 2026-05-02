@@ -1,5 +1,5 @@
 syntax = "proto3";
-package blockchain;
+package node;
 
 // Request Types
 
@@ -27,7 +27,7 @@ message TransactionRequest {
   oneof record {
     CreateAccountRequest create_account_request = 1;
     BidRequest bid_request = 2;
-    CreateAuctionRequest create_action_request = 3;
+    CreateAuctionRequest create_auction_request = 3;
     StopAuctionRequest stop_auction_request = 4;
   }
   string signature = 5;

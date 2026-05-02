@@ -72,7 +72,7 @@ pub trait DhtRpc {
                 }
 
                 event = runtime.swarm.select_next_some() => {
-                    DhtBehaviourEvent::from_event(event, runtime)?;
+                    DhtBehaviourEvent::from_event(event, runtime).await?;
                 }
             }
         }
