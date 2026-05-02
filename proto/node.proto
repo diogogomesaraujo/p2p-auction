@@ -12,3 +12,39 @@ message BidRequest {
   string from = 2;
   uint64 amount = 3;
 }
+
+message CreateAuctionRequest {
+  string auction_id = 1;
+  string from = 2;
+  uint64 start_amount = 3;
+}
+
+message StopAuctionRequest {
+  string auction_id = 1;
+}
+
+message TransactionRequest {
+  oneof record {
+    CreateAccountRequest create_account_request = 1;
+    BidRequest bid_request = 2;
+    CreateAuctionRequest create_action_request = 3;
+    StopAuctionRequest stop_auction_request = 4;
+  }
+  string signature = 5;
+  string from = 6;
+}
+
+// Response Types
+
+enum TransactionStatus {
+  SUCCESSFUL = 0;
+  FAILED = 1;
+}
+
+message TransactionResponse {
+  TransactionStatus status = 1;
+}
+
+service NodeRpcService {
+  rpc Transaction(TransactionRequest) returns (TransactionResponse);
+}

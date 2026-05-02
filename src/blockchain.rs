@@ -28,6 +28,7 @@ pub mod ed25519 {
     use hex::ToHex;
     use std::error::Error;
 
+    /// Function that converts a string into an Ed25519 public key.
     pub fn string_to_public_key(
         public_key: &str,
     ) -> Result<PublicKey, Box<dyn Error + Send + Sync>> {
@@ -37,6 +38,7 @@ pub mod ed25519 {
         }
     }
 
+    /// Function that converts a string into an Ed25519 signature.
     pub fn string_to_signature(signature: &str) -> Result<Signature, Box<dyn Error + Send + Sync>> {
         match Signature::from_bytes(&hex::decode(signature)?) {
             Ok(pk) => Ok(pk),
@@ -44,10 +46,12 @@ pub mod ed25519 {
         }
     }
 
-    pub fn signature_tp_string(signature: &Signature) -> String {
+    /// Function that converts an Ed25519 signature into a string.
+    pub fn signature_to_string(signature: &Signature) -> String {
         signature.encode_hex()
     }
 
+    /// Function that converts an Ed25519 public key into a string.
     pub fn public_key_to_string(public_key: &PublicKey) -> String {
         public_key.encode_hex()
     }
@@ -60,6 +64,7 @@ pub mod hash {
     use std::error::Error;
 
     pub trait Hashable {
+        /// Function that hashes a transaction in the context of merkle trees.
         fn hash(&self) -> Result<String, Box<dyn Error + Send + Sync>>;
     }
 
@@ -96,7 +101,7 @@ pub mod hash {
 /// Module that defines the proof-of-work algorithm of the blockchain.
 pub mod pow {
     use crate::{
-        blockchain::{block::UnsignedBlock, hash, transaction::Transaction},
+        blockchain::{block::Header, hash, transaction::Transaction},
         time::{Timestamp, now_unix},
     };
     use std::error::Error;
@@ -107,10 +112,11 @@ pub mod pow {
 
     /// Constant that represents the magic number used to define the difficulty of mineration.
     const TARGET: &[u8] = &[
-        0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0,
     ];
 
+    /// Macro that determines the computational problem that will ensure the proof-of-work difficulty.
     macro_rules! puzzle {
         ($hash:ident, $target:expr) => {
             $hash.as_slice() < $target
@@ -138,7 +144,7 @@ pub mod pow {
                 }
 
                 let unsigned_block =
-                    UnsignedBlock::new(previous_hash, &pow.transactions, nonce, timestamp)?;
+                    Header::new(previous_hash, &pow.transactions, nonce, timestamp)?;
 
                 let h = unsigned_block.hash()?;
 
@@ -149,6 +155,7 @@ pub mod pow {
         }
     }
 
+    /// Function that verifies if a proposed block hash solved the puzzle correctly.
     pub fn verify(hash: Vec<u8>) -> bool {
         puzzle!(hash, TARGET)
     }
@@ -219,7 +226,7 @@ pub mod transaction {
     use crate::{
         blockchain::{
             Blockchain, HashFunction, WorldState,
-            ed25519::{signature_tp_string, string_to_public_key, string_to_signature},
+            ed25519::{signature_to_string, string_to_public_key, string_to_signature},
             hash::{self, Hashable},
         },
         time::{Timestamp, now_unix},
@@ -316,7 +323,7 @@ pub mod transaction {
                 record,
                 from.to_string(),
                 nonce,
-                &signature_tp_string(&keys.sign(input.as_bytes())),
+                &signature_to_string(&keys.sign(input.as_bytes())),
             )?)
         }
 
@@ -396,6 +403,7 @@ pub mod transaction {
             self.0.len()
         }
 
+        /// Function that removes a transaction from the transaction pool.
         pub fn remove(&mut self, timestamp: Timestamp) {
             self.0.remove(&timestamp);
         }
@@ -416,6 +424,7 @@ pub mod transaction {
             memqueue
         }
 
+        /// Function that checks if a transaction is in the pool.
         pub fn contains(&self, transaction: &Transaction) -> bool {
             self.0.contains_key(&transaction.created_at)
                 && self.0[&transaction.created_at] == *transaction
@@ -487,6 +496,7 @@ pub mod account {
     }
 
     impl Account {
+        /// Function that creates a new account.
         pub fn new(kind: Kind, public_key: String) -> Result<Self, Box<dyn Error + Send + Sync>> {
             Ok(Self {
                 kind,
@@ -516,14 +526,14 @@ pub mod block {
     use std::error::Error;
 
     /// Struct that represents the parameters that form the block's hash.
-    pub struct UnsignedBlock {
+    pub struct Header {
         pub previous_hash: String,
         pub merkle_root: String,
         pub nonce: u32,
         pub timestamp: Timestamp,
     }
 
-    impl UnsignedBlock {
+    impl Header {
         /// Function that creates a new unsigned block.
         pub fn new(
             previous_hash: &str,
@@ -596,7 +606,7 @@ pub mod block {
 
         /// Function that verifies if a block has a valid hash.
         pub fn verify(&self) -> Result<bool, Box<dyn Error + Send + Sync>> {
-            let unsigned_block = UnsignedBlock::new(
+            let unsigned_block = Header::new(
                 &self.previous_hash,
                 &self.transactions,
                 self.nonce,
@@ -638,6 +648,7 @@ impl Blockchain {
         })
     }
 
+    /// Function that verifies and executes the transactions in a block to change the world state of the blockchain.
     fn execute_transactions(
         &mut self,
         block_to_append: &Block,
@@ -652,6 +663,7 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Function that accepts a block proposed by another node.
     pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
         if !block.verify()? {
             return Err("The block proposed has an invalid hash.".into());
@@ -688,6 +700,7 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Function that returns the hash of the last block in the correct chain (the chain might have bifurcations).
     fn insert_after(&self) -> Option<String> {
         let chain = self.hash_chain();
 
@@ -764,6 +777,7 @@ impl Blockchain {
         Ok(true)
     }
 
+    /// Function that returns pairs of previous hash and hash for all the blocks in the chain.
     fn hash_chain(&self) -> Vec<(String, String)> {
         self.blocks
             .iter()
@@ -771,11 +785,10 @@ impl Blockchain {
             .collect()
     }
 
+    /// Function that chooses the correct bifurcation.
     fn choose_hash(h1: &str, h2: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
         let h1b = BigUint::from_bytes_le(&hex::decode(h1)?);
         let h2b = BigUint::from_bytes_le(&hex::decode(h2)?);
-
-        assert_eq!(h1b.to_str_radix(16), h1);
 
         match h1b < h2b {
             true => Ok(h1.to_string()),
@@ -783,6 +796,8 @@ impl Blockchain {
         }
     }
 
+    /// Function that removes bifurcations, throwing the transactions in the blocks of discarted branches
+    /// back to the transaction pool.
     pub fn fix(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // break the chain
         let mut map: HashMap<String, String> = HashMap::new();
@@ -831,15 +846,9 @@ impl Blockchain {
     }
 }
 
-pub trait Mine {}
-
 /// Trait that defines the functions that can mutate the blockchain.
 pub trait WorldState {
-    const CREATE_ACCOUNT_MESSAGE: &str = "blocktion";
-
     fn get_account_by_id(&self, public_key: &str) -> Option<&Account>;
-
-    fn get_account_by_id_mut(&mut self, public_key: &str) -> Option<&mut Account>;
 
     fn create_account(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
@@ -855,10 +864,6 @@ impl WorldState for Blockchain {
 
     fn get_account_by_id(&self, public_key: &str) -> Option<&Account> {
         self.accounts.get(&public_key.to_string())
-    }
-
-    fn get_account_by_id_mut(&mut self, public_key: &str) -> Option<&mut Account> {
-        self.accounts.get_mut(&public_key.to_string())
     }
 }
 
