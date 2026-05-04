@@ -25,6 +25,9 @@ struct Args {
 
     #[arg(long)]
     boot_key: String,
+
+    #[arg(long)]
+    rpc_port: u32,
 }
 
 fn boot_nodes_from_str(
@@ -44,7 +47,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let self_key = get_key(&args.key_path)?;
 
-    let node = Node::new(boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?);
+    let node = Node::new(
+        boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?,
+        &format!("127.0.0.1:{}", args.rpc_port),
+    );
 
     let mut i = node.init(IPFS_PROTO_NAME, self_key).await?;
     Node::run(&mut i, BufReader::new(stdin())).await?;

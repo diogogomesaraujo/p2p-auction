@@ -16,3 +16,5 @@ quando um node faz bootstrap manda tb uma gRPC a pedir a blockchain e constroi o
 o bootstrap node quando recebe uma connecção (connection established) envia a blockchain ao peer.
 o peer dá stall enquanto espera a resposta -> simples await
 o bootstrap node envia a blockchain assincronamente.
+
+fix docker has to have proto

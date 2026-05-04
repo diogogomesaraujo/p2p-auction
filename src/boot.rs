@@ -21,7 +21,10 @@ use tracing::info;
 
 /// Struct that represents a boot node of the network.
 /// Boot nodes serve as entry points and keep track of peers currently using the network.
-pub struct BootNode(Multiaddr);
+pub struct BootNode {
+    multi_address: Multiaddr,
+    rpc_address: String,
+}
 
 pub enum RpcAction {
     Ping,
@@ -30,8 +33,14 @@ pub enum RpcAction {
 
 impl BootNode {
     /// Function that creates a new boot node from a predetermined address.
-    pub fn new(address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        Ok(Self(address.parse::<Multiaddr>()?))
+    pub fn new(
+        multi_address: &str,
+        rpc_address: &str,
+    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+        Ok(Self {
+            multi_address: multi_address.parse::<Multiaddr>()?,
+            rpc_address: rpc_address.to_string(),
+        })
     }
 }
 
@@ -52,7 +61,7 @@ impl DhtRpc for BootNode {
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
-        let state = State::init()?;
+        let state = State::init(&self.rpc_address)?;
 
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()
@@ -190,7 +199,7 @@ impl DhtRpc for BootNode {
             .build();
 
         swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
-        swarm.listen_on(self.0)?;
+        swarm.listen_on(self.multi_address)?;
 
         let mut runtime = Runtime::new(swarm, state);
         runtime.load_from_local()?;

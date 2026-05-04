@@ -13,7 +13,10 @@ struct Args {
     key_path: String,
 
     #[arg(long)]
-    port: u32,
+    kad_port: u32,
+
+    #[arg(long)]
+    rpc_port: u32,
 
     #[arg(long)]
     state_path: Option<String>,
@@ -25,7 +28,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     tracing_subscriber::fmt().try_init()?;
 
-    let node = BootNode::new(&format!("/ip4/0.0.0.0/tcp/{}", args.port))?;
+    let node = BootNode::new(
+        &format!("/ip4/0.0.0.0/tcp/{}", args.kad_port),
+        &format!("127.0.0.1:{}", args.rpc_port),
+    )?;
 
     let self_key = get_key(&args.key_path)?;
 

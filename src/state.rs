@@ -1,5 +1,5 @@
 use crate::blockchain::transaction::{Data, Transaction};
-use crate::state::blockchain::node_rpc_service_server::NodeRpcService;
+use crate::state::blockchain::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
 use crate::state::blockchain::transaction_request::Record;
 use crate::state::blockchain::{
     BidRequest, CreateAccountRequest, CreateAuctionRequest, StopAuctionRequest, TransactionRequest,
@@ -10,12 +10,16 @@ use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 #[derive(Debug)]
 pub struct State {
+    pub rpc_address: SocketAddr,
     pub peers: HashMap<PeerId, PeerInfo>,
     pub blockchain: Arc<RwLock<Blockchain>>,
 }
@@ -42,11 +46,23 @@ impl Default for PeerInfo {
 }
 
 impl State {
-    pub fn init() -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn init(rpc_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             peers: HashMap::new(),
             blockchain: Arc::new(RwLock::new(Blockchain::new(u32::MAX)?)), // ??? replace by an initial probe function
+            rpc_address: SocketAddr::from_str(rpc_address)?,
         })
+    }
+
+    pub async fn run(self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let address = self.rpc_address.clone();
+
+        Server::builder()
+            .add_service(NodeRpcServiceServer::new(self))
+            .serve(address)
+            .await?;
+
+        Ok(())
     }
 }
 
