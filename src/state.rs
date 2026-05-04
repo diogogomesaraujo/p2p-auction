@@ -21,7 +21,7 @@ use tonic::{Request, Response, Status};
 pub struct State {
     pub rpc_address: SocketAddr,
     pub peers: HashMap<PeerId, PeerInfo>,
-    pub blockchain: Arc<RwLock<Blockchain>>,
+    pub blockchain: Blockchain,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,13 +49,21 @@ impl State {
     pub fn init(rpc_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             peers: HashMap::new(),
-            blockchain: Arc::new(RwLock::new(Blockchain::new(u32::MAX)?)), // ??? replace by an initial probe function
+            blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
             rpc_address: SocketAddr::from_str(rpc_address)?,
         })
     }
+}
 
-    pub async fn run(self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let address = self.rpc_address.clone();
+#[async_trait::async_trait]
+pub trait Runnable {
+    async fn run(self) -> Result<(), Box<dyn Error + Send + Sync>>;
+}
+
+#[async_trait::async_trait]
+impl Runnable for Arc<RwLock<State>> {
+    async fn run(self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let address = self.read().await.rpc_address.clone();
 
         Server::builder()
             .add_service(NodeRpcServiceServer::new(self))
@@ -71,7 +79,7 @@ pub mod blockchain {
 }
 
 #[tonic::async_trait]
-impl NodeRpcService for State {
+impl NodeRpcService for Arc<RwLock<State>> {
     async fn transaction(
         &self,
         request: Request<TransactionRequest>,
@@ -145,10 +153,10 @@ impl NodeRpcService for State {
         };
 
         match self
-            .blockchain
             .clone()
             .write()
             .await
+            .blockchain
             .transaction_pool
             .add_transaction(transaction)
         {

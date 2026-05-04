@@ -75,6 +75,8 @@ impl DhtBehaviourEvent {
             } => {
                 if runtime
                     .state
+                    .write()
+                    .await
                     .peers
                     .get(&peer_id)
                     .map_or(false, |p| p.blacklisted)
@@ -88,12 +90,20 @@ impl DhtBehaviourEvent {
                 }
 
                 let now = now_unix()?;
-                let entry = runtime.state.peers.entry(peer_id).or_default();
-                if entry.first_seen.is_none() {
-                    entry.first_seen = Some(now);
+                if let entry = runtime
+                    .state
+                    .write()
+                    .await
+                    .peers
+                    .entry(peer_id)
+                    .or_default()
+                {
+                    if entry.first_seen.is_none() {
+                        entry.first_seen = Some(now);
+                    }
+                    entry.last_seen = Some(now);
+                    entry.session_count = entry.session_count.saturating_add(1);
                 }
-                entry.last_seen = Some(now);
-                entry.session_count = entry.session_count.saturating_add(1);
 
                 runtime
                     .swarm
@@ -109,7 +119,7 @@ impl DhtBehaviourEvent {
                 } else {
                     info!("Connection to {:?} closed cleanly.", peer_id);
                 }
-                if let Some(entry) = runtime.state.peers.get_mut(&peer_id) {
+                if let Some(entry) = runtime.state.write().await.peers.get_mut(&peer_id) {
                     entry.last_seen = Some(now);
                 }
             }
@@ -131,31 +141,35 @@ impl DhtBehaviourEvent {
                          addresses={addresses:?} bucket_range={bucket_range:?} old_peer={old_peer:?}"
                     );
                     let now = now_unix()?;
-                    let entry = runtime.state.peers.entry(peer).or_default();
-                    if entry.first_seen.is_none() {
-                        entry.first_seen = Some(now);
+                    if let entry = runtime.state.write().await.peers.entry(peer).or_default() {
+                        if entry.first_seen.is_none() {
+                            entry.first_seen = Some(now);
+                        }
+                        entry.last_seen = Some(now);
                     }
-                    entry.last_seen = Some(now);
                 }
 
                 kad::Event::UnroutablePeer { peer } => {
                     info!("UnroutablePeer peer={peer:?}");
                     let now = now_unix()?;
-                    let entry = runtime.state.peers.entry(peer).or_default();
-                    if entry.first_seen.is_none() {
-                        entry.first_seen = Some(now);
+                    if let entry = runtime.state.write().await.peers.entry(peer).or_default() {
+                        if entry.first_seen.is_none() {
+                            entry.first_seen = Some(now);
+                        }
+                        entry.last_seen = Some(now);
                     }
-                    entry.last_seen = Some(now);
                 }
 
                 kad::Event::RoutablePeer { peer, address } => {
                     info!("RoutablePeer peer={peer:?} address={address:?}");
                     let now = now_unix()?;
-                    let entry = runtime.state.peers.entry(peer).or_default();
-                    if entry.first_seen.is_none() {
-                        entry.first_seen = Some(now);
+                    if let entry = runtime.state.write().await.peers.entry(peer).or_default() {
+                        if entry.first_seen.is_none() {
+                            entry.first_seen = Some(now);
+                        }
+                        entry.last_seen = Some(now);
                     }
-                    entry.last_seen = Some(now);
+
                     runtime
                         .swarm
                         .behaviour_mut()
@@ -166,11 +180,12 @@ impl DhtBehaviourEvent {
                 kad::Event::PendingRoutablePeer { peer, address } => {
                     info!("PendingRoutablePeer peer={peer:?} address={address:?}");
                     let now = now_unix()?;
-                    let entry = runtime.state.peers.entry(peer).or_default();
-                    if entry.first_seen.is_none() {
-                        entry.first_seen = Some(now);
+                    if let entry = runtime.state.write().await.peers.entry(peer).or_default() {
+                        if entry.first_seen.is_none() {
+                            entry.first_seen = Some(now);
+                        }
+                        entry.last_seen = Some(now);
                     }
-                    entry.last_seen = Some(now);
                 }
 
                 kad::Event::ModeChanged { new_mode } => {
@@ -208,26 +223,44 @@ impl DhtBehaviourEvent {
                     event.connection, event.peer, event.result
                 );
                 let now = now_unix()?;
-                let entry = runtime.state.peers.entry(event.peer).or_default();
-                if entry.first_seen.is_none() {
-                    entry.first_seen = Some(now);
+                if let entry = runtime
+                    .state
+                    .write()
+                    .await
+                    .peers
+                    .entry(event.peer)
+                    .or_default()
+                {
+                    if entry.first_seen.is_none() {
+                        entry.first_seen = Some(now);
+                    }
+                    entry.last_seen = Some(now);
                 }
-                entry.last_seen = Some(now);
 
                 if let Err(e) = event.result {
                     warn!("Ping failed for {:?}: {:?}", event.peer, e);
-                    runtime.adjust_score(&event.peer, PUNISH_PING_FAILURE)?;
+                    runtime
+                        .adjust_score(&event.peer, PUNISH_PING_FAILURE)
+                        .await?;
                 }
             }
 
             SwarmEvent::Behaviour(DhtBehaviourEvent::Identify(event)) => {
                 if let identify::Event::Received { peer_id, info, .. } = *event {
                     let now = now_unix()?;
-                    let entry = runtime.state.peers.entry(peer_id).or_default();
-                    if entry.first_seen.is_none() {
-                        entry.first_seen = Some(now);
+                    if let entry = runtime
+                        .state
+                        .write()
+                        .await
+                        .peers
+                        .entry(peer_id)
+                        .or_default()
+                    {
+                        if entry.first_seen.is_none() {
+                            entry.first_seen = Some(now);
+                        }
+                        entry.last_seen = Some(now);
                     }
-                    entry.last_seen = Some(now);
                     for addr in info.listen_addrs {
                         runtime
                             .swarm
@@ -252,14 +285,20 @@ impl DhtBehaviourEvent {
                     Ok(block) => {
                         if let Err(e) = runtime.accept_block(block).await {
                             error!("Failed to accept block from {:?}: {e}", propagation_source);
-                            runtime.adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)?;
+                            runtime
+                                .adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)
+                                .await?;
                         } else {
-                            runtime.adjust_score(&propagation_source, REWARD_VALID_BLOCK)?;
+                            runtime
+                                .adjust_score(&propagation_source, REWARD_VALID_BLOCK)
+                                .await?;
                         }
                     }
                     Err(e) => {
                         error!("Malformed block from {:?}: {e}", propagation_source);
-                        runtime.adjust_score(&propagation_source, PUNISH_MALFORMED_BLOCK)?;
+                        runtime
+                            .adjust_score(&propagation_source, PUNISH_MALFORMED_BLOCK)
+                            .await?;
                     }
                 }
             }

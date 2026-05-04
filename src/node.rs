@@ -214,7 +214,7 @@ impl DhtRpc for Node {
         swarm.listen_on(LISTEN_ON.parse()?)?;
 
         let mut runtime = Runtime::new(swarm, state);
-        runtime.load_from_local()?;
+        runtime.load_from_local().await?;
 
         Ok(runtime)
     }

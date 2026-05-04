@@ -202,7 +202,7 @@ impl DhtRpc for BootNode {
         swarm.listen_on(self.multi_address)?;
 
         let mut runtime = Runtime::new(swarm, state);
-        runtime.load_from_local()?;
+        runtime.load_from_local().await?;
 
         Ok(runtime)
     }
