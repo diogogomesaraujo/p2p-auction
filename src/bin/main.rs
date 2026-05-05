@@ -47,12 +47,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let self_key = get_key(&args.key_path)?;
 
-    let node = Node::new(
-        boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?,
-        &format!("127.0.0.1:{}", args.rpc_port),
-    );
+    let node = Node::new(boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?);
 
-    let mut i = node.init(IPFS_PROTO_NAME, self_key).await?;
+    let mut i = node
+        .init(
+            IPFS_PROTO_NAME,
+            self_key,
+            &format!("127.0.0.1:{}", args.rpc_port),
+        )
+        .await?;
     Node::run(&mut i, BufReader::new(stdin())).await?;
 
     Ok(())

@@ -22,8 +22,7 @@ use tracing::info;
 /// Struct that represents a boot node of the network.
 /// Boot nodes serve as entry points and keep track of peers currently using the network.
 pub struct BootNode {
-    multi_address: Multiaddr,
-    rpc_address: String,
+    pub multi_address: Multiaddr,
 }
 
 pub enum RpcAction {
@@ -33,13 +32,9 @@ pub enum RpcAction {
 
 impl BootNode {
     /// Function that creates a new boot node from a predetermined address.
-    pub fn new(
-        multi_address: &str,
-        rpc_address: &str,
-    ) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn new(multi_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             multi_address: multi_address.parse::<Multiaddr>()?,
-            rpc_address: rpc_address.to_string(),
         })
     }
 }
@@ -60,8 +55,9 @@ impl DhtRpc for BootNode {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
+        rpc_address: &str,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
-        let state = State::init(&self.rpc_address)?;
+        let state = State::init(rpc_address)?;
 
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()

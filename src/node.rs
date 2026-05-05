@@ -26,7 +26,6 @@ use std::{
 use tracing::info;
 
 pub struct Node {
-    pub rpc_address: String,
     pub bootstrap_nodes: Vec<(Multiaddr, PeerId)>,
 }
 
@@ -38,11 +37,8 @@ pub enum RpcAction {
 }
 
 impl Node {
-    pub fn new(bootstrap_nodes: Vec<(Multiaddr, PeerId)>, rpc_address: &str) -> Self {
-        Self {
-            bootstrap_nodes,
-            rpc_address: rpc_address.to_string(),
-        }
+    pub fn new(bootstrap_nodes: Vec<(Multiaddr, PeerId)>) -> Self {
+        Self { bootstrap_nodes }
     }
 }
 
@@ -64,8 +60,9 @@ impl DhtRpc for Node {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
+        rpc_address: &str,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
-        let state = State::init(&self.rpc_address)?;
+        let state = State::init(rpc_address)?;
 
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()

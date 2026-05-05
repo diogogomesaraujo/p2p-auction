@@ -1,4 +1,4 @@
-use crate::{behaviour::DhtBehaviourEvent, runtime::Runtime};
+use crate::{behaviour::DhtBehaviourEvent, runtime::Runtime, state::Runnable};
 use async_trait::async_trait;
 use libp2p::{StreamProtocol, futures::StreamExt, identity::Keypair};
 use std::{error::Error, str::SplitWhitespace};
@@ -56,12 +56,21 @@ pub trait DhtRpc {
         self,
         ipfs_proto_name: StreamProtocol,
         key: Keypair,
+        rpc_address: &str,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>>;
 
     async fn run(
         runtime: &mut Runtime,
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        {
+            let state = runtime.state.clone();
+            tokio::spawn(async move {
+                state.run().await?;
+                Ok::<(), Box<dyn Error + Send + Sync>>(())
+            });
+        }
+
         let mut lines = buffer_reader.lines();
 
         loop {
