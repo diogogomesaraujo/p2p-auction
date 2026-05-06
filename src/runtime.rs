@@ -72,27 +72,19 @@ impl Runtime {
         peer_id: &PeerId,
         delta: f64,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if let entry = self
-            .state
-            .write()
-            .await
-            .peers
-            .entry(peer_id.clone())
-            .or_default()
-        {
-            entry.application_score += delta;
-            let score = entry.application_score;
+        let mut state = self.state.write().await;
+        let entry = state.peers.entry(peer_id.clone()).or_default();
 
-            self.swarm
-                .behaviour_mut()
-                .gossip
-                .set_application_score(peer_id, score);
-
-            if score <= SCORE_BLACKLIST_THRESHOLD {
-                warn!("Blacklisting peer {:?} (score={})", peer_id, score);
-                self.swarm.behaviour_mut().gossip.blacklist_peer(peer_id);
-                entry.blacklisted = true;
-            }
+        entry.application_score += delta;
+        let score = entry.application_score;
+        self.swarm
+            .behaviour_mut()
+            .gossip
+            .set_application_score(peer_id, score);
+        if score <= SCORE_BLACKLIST_THRESHOLD {
+            warn!("Blacklisting peer {:?} (score={})", peer_id, score);
+            self.swarm.behaviour_mut().gossip.blacklist_peer(peer_id);
+            entry.blacklisted = true;
         }
 
         Ok(())
