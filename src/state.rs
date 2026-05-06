@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct State {
@@ -151,6 +152,11 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 }
             }
         };
+
+        info!(
+            "Adding transaction {:?} to the blockchain's transaction pool.",
+            transaction
+        );
 
         match self
             .clone()
