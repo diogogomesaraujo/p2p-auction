@@ -23,6 +23,7 @@ pub struct State {
     pub rpc_address: SocketAddr,
     pub peers: HashMap<PeerId, PeerInfo>,
     pub blockchain: Blockchain,
+    pub initialized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,7 @@ impl State {
             peers: HashMap::new(),
             blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
             rpc_address: SocketAddr::from_str(rpc_address)?,
+            initialized: false,
         })
     }
 }

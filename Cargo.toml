@@ -33,6 +33,8 @@ libp2p = { version = "0.56.0", features = [
   "ping",
   "identify",
   "macros",
+  "request-response",
+  "cbor",
 ] }
 libp2p-gossipsub = "0.49.4"
 tonic = "0.14.5"

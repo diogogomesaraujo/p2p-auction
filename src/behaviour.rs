@@ -8,13 +8,27 @@ use crate::{
     topic,
 };
 use libp2p::{
-    identify, kad, ping,
+    identify, kad, ping, request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
 };
 use libp2p_gossipsub::{self as gossipsub};
+use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
 use std::error::Error;
 use tracing::{error, info, warn};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Request {
+    GetFullBlockchain,
+    GetFullBlockchainHash,
+    // GetBlockByHash,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Response {
+    Blocks(Vec<Block>),
+    Hashes(Vec<String>),
+}
 
 /// Struct that represents the `libp2p` primitives used to construct the DHT.
 #[derive(NetworkBehaviour)]
@@ -24,6 +38,7 @@ pub struct DhtBehaviour {
     pub ping: ping::Behaviour,
     pub identify: identify::Behaviour,
     pub gossip: gossipsub::Behaviour,
+    pub request_response: request_response::cbor::Behaviour<Request, Response>,
 }
 
 /// Struct that represents a DHT event.
@@ -33,6 +48,7 @@ pub enum DhtBehaviourEvent {
     Ping(ping::Event),
     Identify(Box<identify::Event>),
     Gossip(gossipsub::Event),
+    RequestResponse(request_response::Event<Request, Response>),
 }
 
 impl From<kad::Event> for DhtBehaviourEvent {
@@ -56,6 +72,12 @@ impl From<identify::Event> for DhtBehaviourEvent {
 impl From<gossipsub::Event> for DhtBehaviourEvent {
     fn from(event: gossipsub::Event) -> Self {
         Self::Gossip(event)
+    }
+}
+
+impl From<request_response::Event<Request, Response>> for DhtBehaviourEvent {
+    fn from(event: request_response::Event<Request, Response>) -> Self {
+        Self::RequestResponse(event)
     }
 }
 
@@ -105,6 +127,20 @@ impl DhtBehaviourEvent {
                     .behaviour_mut()
                     .kad
                     .add_address(&peer_id, endpoint.get_remote_address().clone());
+
+                if !runtime.state.read().await.initialized
+                    && runtime.swarm.connected_peers().next().is_some()
+                {
+                    runtime
+                        .swarm
+                        .behaviour_mut()
+                        .request_response
+                        .send_request(&peer_id, Request::GetFullBlockchain);
+
+                    runtime.state.write().await.initialized = true;
+
+                    info!("Requested full blockchain from {:?}", peer_id);
+                }
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -265,61 +301,135 @@ impl DhtBehaviourEvent {
                 }
             }
 
-            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::Message {
-                propagation_source,
-                message_id,
-                message,
-            })) if message.topic.as_str() == topic::BLOCKS => {
-                info!(
-                    "Received block gossip from {:?}, id {:?}",
-                    propagation_source, message_id
-                );
+            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(event)) => match event {
+                libp2p_gossipsub::Event::Message {
+                    propagation_source,
+                    message_id,
+                    message,
+                } if message.topic.as_str() == topic::BLOCKS => {
+                    info!(
+                        "Received block gossip from {:?}, id {:?}",
+                        propagation_source, message_id
+                    );
 
-                match from_slice::<Block>(&message.data) {
-                    Ok(block) => {
-                        if let Err(e) = runtime.accept_block(block).await {
-                            error!("Failed to accept block from {:?}: {e}", propagation_source);
+                    match from_slice::<Block>(&message.data) {
+                        Ok(block) => {
+                            if let Err(e) = runtime.accept_block(block).await {
+                                error!("Failed to accept block from {:?}: {e}", propagation_source);
+                                runtime
+                                    .adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)
+                                    .await?;
+                            } else {
+                                runtime
+                                    .adjust_score(&propagation_source, REWARD_VALID_BLOCK)
+                                    .await?;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Malformed block from {:?}: {e}", propagation_source);
                             runtime
-                                .adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)
-                                .await?;
-                        } else {
-                            runtime
-                                .adjust_score(&propagation_source, REWARD_VALID_BLOCK)
+                                .adjust_score(&propagation_source, PUNISH_MALFORMED_BLOCK)
                                 .await?;
                         }
                     }
-                    Err(e) => {
-                        error!("Malformed block from {:?}: {e}", propagation_source);
-                        runtime
-                            .adjust_score(&propagation_source, PUNISH_MALFORMED_BLOCK)
-                            .await?;
-                    }
                 }
-            }
 
-            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::Subscribed {
-                peer_id,
-                topic,
-            })) => {
-                info!("Peer {:?} subscribed to topic {}", peer_id, topic);
-            }
+                gossipsub::Event::Message {
+                    propagation_source,
+                    message_id,
+                    message,
+                } => {
+                    info!(
+                        "Ignoring gossip message from {:?}, id {:?}, topic {:?}",
+                        propagation_source, message_id, message.topic
+                    );
+                }
 
-            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::Unsubscribed {
-                peer_id,
-                topic,
-            })) => {
-                info!("Peer {:?} unsubscribed from topic {}", peer_id, topic);
-            }
+                libp2p_gossipsub::Event::GossipsubNotSupported { peer_id } => {
+                    warn!("Gossipsub not supported by {:?}", peer_id);
+                }
 
-            SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(gossipsub::Event::SlowPeer {
-                peer_id,
-                failed_messages,
-            })) => {
-                warn!(
-                    "Slow peer {:?}: {:?} failed messages",
-                    peer_id, failed_messages
-                );
-            }
+                libp2p_gossipsub::Event::SlowPeer {
+                    peer_id,
+                    failed_messages,
+                } => {
+                    warn!(
+                        "Slow peer {:?}: {:?} failed messages",
+                        peer_id, failed_messages
+                    );
+                }
+
+                libp2p_gossipsub::Event::Subscribed { peer_id, topic } => {
+                    info!("Peer {:?} subscribed to topic {}", peer_id, topic);
+                }
+
+                libp2p_gossipsub::Event::Unsubscribed { peer_id, topic } => {
+                    info!("Peer {:?} unsubscribed from topic {}", peer_id, topic);
+                }
+            },
+
+            SwarmEvent::Behaviour(DhtBehaviourEvent::RequestResponse(event)) => match event {
+                request_response::Event::Message { peer, message, .. } => match message {
+                    request_response::Message::Request {
+                        request, channel, ..
+                    } => {
+                        info!("Direct request from {:?}: {:?}", peer, request);
+                        let response = match request {
+                            Request::GetFullBlockchain => Response::Blocks(
+                                runtime.state.read().await.blockchain.blocks.clone(),
+                            ),
+                            Request::GetFullBlockchainHash => {
+                                // consider saving blockchain hashes in Blockchain
+                                let hashes = runtime
+                                    .state
+                                    .read()
+                                    .await
+                                    .blockchain
+                                    .blocks
+                                    .clone()
+                                    .iter()
+                                    .map(|b| b.hash.clone())
+                                    .collect();
+                                Response::Hashes(hashes)
+                            }
+                        };
+                        if let Err(e) = runtime
+                            .swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, response)
+                        {
+                            error!("Failed to send response to {:?}: {:?}", peer, e);
+                        }
+                    }
+                    request_response::Message::Response { response, .. } => {
+                        info!("Direct response from {:?}: {:?}", peer, response);
+                        match response {
+                            Response::Blocks(blocks) => {
+                                // verify blockchain, each block etc. only accept if seems legit
+                                // if accepted replace blockhain in state
+                                // later send to acceptance state and only after receiving 2 hashes
+                                // from other peers that confirm the blockhain actually replace
+                            }
+                            Response::Hashes(hashes) => {
+                                // verify against blockchain
+                                // assess and do whatever
+                            }
+                        }
+                    }
+                },
+                request_response::Event::OutboundFailure { peer, error, .. } => {
+                    warn!("Outbound request failure to {:?}: {:?}", peer, error);
+                }
+
+                request_response::Event::InboundFailure { peer, error, .. } => {
+                    warn!("Inbound request failure from {:?}: {:?}", peer, error);
+                }
+
+                request_response::Event::ResponseSent { peer, .. } => {
+                    info!("Response sent to {:?}", peer);
+                }
+            },
 
             _ => {}
         }

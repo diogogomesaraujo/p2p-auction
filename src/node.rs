@@ -1,5 +1,5 @@
 use crate::{
-    behaviour::DhtBehaviour,
+    behaviour::{DhtBehaviour, Request, Response},
     rpc::{DhtRpc, LISTEN_ON},
     runtime::Runtime,
     state::State,
@@ -10,7 +10,9 @@ use libp2p::{
     Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
     identity::Keypair,
     kad::{self, Caching, Config, K_VALUE, KBucketKey, Mode, store::MemoryStore},
-    noise, ping, tcp, yamux,
+    noise, ping,
+    request_response::{self, ProtocolSupport},
+    tcp, yamux,
 };
 use libp2p_gossipsub::{
     self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, PeerScoreParams,
@@ -187,14 +189,24 @@ impl DhtRpc for Node {
                 // };
 
                 gossip.with_peer_score(peer_score, thresholds)?;
-
                 gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
+
+                /* Request Response */
+
+                let request_response = request_response::cbor::Behaviour::<Request, Response>::new(
+                    [(
+                        StreamProtocol::new("/blockchain/cbor/1"),
+                        ProtocolSupport::Full,
+                    )],
+                    request_response::Config::default(),
+                );
 
                 Ok(DhtBehaviour {
                     kad,
                     ping,
                     identify,
                     gossip,
+                    request_response,
                 })
             })?
             .build();
