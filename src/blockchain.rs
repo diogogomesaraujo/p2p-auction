@@ -1014,7 +1014,6 @@ mod test {
         Ok(())
     }
 
-    // FAILED
     /// Tests that flush() drains the pool and returns all transactions sorted by timestamp
     #[test]
     fn test_pool_flush_returns_transactions_and_empties_pool()
