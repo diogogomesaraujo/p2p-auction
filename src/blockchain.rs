@@ -858,10 +858,15 @@ pub trait WorldState {
 
 impl WorldState for Blockchain {
     fn create_account(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if self.accounts.contains_key(public_key) {
+            return Err("Attempted to create duplicate account.".into());
+        };
+
         self.accounts.insert(
             public_key.to_string(),
             Account::new(account::Kind::User, public_key.to_string())?,
         );
+
         Ok(())
     }
 
