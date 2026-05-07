@@ -30,7 +30,7 @@ impl Runtime {
     }
 
     pub async fn validate_blockchain(
-        &self,
+        &mut self,
         blocks: Vec<Block>,
     ) -> Result<State, Box<dyn Error + Send + Sync>> {
         let mut validated = self.state.read().await.clone();
