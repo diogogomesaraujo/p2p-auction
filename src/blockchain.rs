@@ -1208,7 +1208,6 @@ mod test {
         Ok(())
     }
 
-    // FAILED
     /// Tests that attempting to create an account with an already existing public key fails
     #[test]
     fn test_worldstate_duplicate_account_is_rejected() -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1322,7 +1321,6 @@ mod test {
         Ok(())
     }
 
-    // FAILED
     /// Tests that propose_block() correctly executes transactions, creating the account on-chain
     #[test]
     fn test_blockchain_propose_block_executes_transactions()
