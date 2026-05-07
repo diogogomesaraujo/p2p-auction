@@ -1,6 +1,10 @@
 use crate::{
     behaviour::DhtBehaviour,
-    blockchain::{block::Block, transaction::Transaction},
+    blockchain::{
+        block::Block,
+        merkle::root,
+        transaction::{Transaction, TransactionPool},
+    },
     reputation::SCORE_BLACKLIST_THRESHOLD,
     state::State,
     topic::BLOCKS,
@@ -23,6 +27,42 @@ impl Runtime {
             swarm,
             state: Arc::new(RwLock::new(state)),
         }
+    }
+
+    pub async fn validate_blockchain(
+        &self,
+        blocks: Vec<Block>,
+    ) -> Result<State, Box<dyn Error + Send + Sync>> {
+        let mut validated = self.state.read().await.clone();
+
+        validated.blockchain.blocks.clear();
+        validated.blockchain.accounts.clear();
+        validated.blockchain.transaction_pool = TransactionPool::new();
+
+        let mut previous_hash = "0".to_string();
+
+        for block in blocks {
+            if block.previous_hash != previous_hash {
+                return Err("Invalid blockchain link.".into());
+            }
+
+            if !block.verify()? {
+                return Err("Invalid block hash or proof-of-work.".into());
+            }
+
+            let merkle_root = root(&block.transactions)?;
+
+            if merkle_root != block.merkle_root {
+                return Err("Invalid block Merkle root.".into());
+            }
+
+            validated.blockchain.execute_transactions(&block)?;
+
+            previous_hash = block.hash.clone();
+            validated.blockchain.blocks.push(block.clone());
+        }
+
+        Ok(validated)
     }
 
     /// Function validates and appends to chain a block received over gossip protocol.

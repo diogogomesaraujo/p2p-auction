@@ -612,10 +612,10 @@ pub mod block {
                 self.nonce,
                 self.timestamp,
             )?;
-            match unsigned_block.hash() {
-                Ok(h) => Ok(encode_hash(&h) == self.hash),
-                Err(_) => Ok(false),
-            }
+
+            let h = unsigned_block.hash()?;
+
+            Ok(encode_hash(&h) == self.hash && pow::verify(h))
         }
     }
 
@@ -649,7 +649,7 @@ impl Blockchain {
     }
 
     /// Function that verifies and executes the transactions in a block to change the world state of the blockchain.
-    fn execute_transactions(
+    pub fn execute_transactions(
         &mut self,
         block_to_append: &Block,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -670,7 +670,7 @@ impl Blockchain {
         }
 
         let prev_hash = match self.blocks.last() {
-            Some(b) => b.clone().previous_hash,
+            Some(b) => b.hash.clone(),
             None => "0".to_string(),
         };
 
@@ -760,7 +760,7 @@ impl Blockchain {
 
         let mut hypothetical_blockchain = self.clone();
         hypothetical_blockchain.execute_transactions(&block_to_append)?;
-
+        self.blocks.push(block_to_append);
         Ok(())
     }
 

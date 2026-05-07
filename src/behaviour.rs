@@ -407,12 +407,24 @@ impl DhtBehaviourEvent {
                         info!("Direct response from {:?}: {:?}", peer, response);
                         match response {
                             Response::Blocks(blocks) => {
-                                // verify blockchain, each block etc. only accept if seems legit
-                                // if accepted replace blockhain in state
-                                // later send to acceptance state and only after receiving 2 hashes
-                                // from other peers that confirm the blockhain actually replace
-                                runtime.state.write().await.blockchain.blocks = blocks;
-                                runtime.state.write().await.stage = Stage::Initialized;
+                                let blocks = blocks.clone();
+                                match runtime.validate_blockchain(blocks).await {
+                                    Ok(validated) => {
+                                        *runtime.state.write().await = validated;
+                                        runtime.state.write().await.stage = Stage::Initialized;
+                                        info!(
+                                            "Accepted valid bootstrap blockchain from {:?}",
+                                            peer
+                                        );
+                                    }
+                                    Err(e) => {
+                                        runtime.state.write().await.stage = Stage::JustCreated;
+                                        error!(
+                                            "Rejected invalid bootstrap blockchain from {:?}: {}",
+                                            peer, e
+                                        );
+                                    }
+                                }
                             }
                             Response::Hashes(hashes) => {
                                 // verify against blockchain

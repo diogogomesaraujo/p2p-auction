@@ -18,7 +18,7 @@ use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct State {
     pub rpc_address: SocketAddr,
     pub peers: HashMap<PeerId, PeerInfo>,
@@ -35,7 +35,7 @@ pub struct PeerInfo {
     pub application_score: f64,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Stage {
     JustCreated,
     RequestedBlockchain,
@@ -73,13 +73,11 @@ pub trait Runnable {
 #[async_trait::async_trait]
 impl Runnable for Arc<RwLock<State>> {
     async fn run(self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let address = self.read().await.rpc_address.clone();
-
+        let address = self.read().await.rpc_address;
         Server::builder()
             .add_service(NodeRpcServiceServer::new(self))
             .serve(address)
             .await?;
-
         Ok(())
     }
 }
@@ -168,7 +166,6 @@ impl NodeRpcService for Arc<RwLock<State>> {
         );
 
         match self
-            .clone()
             .write()
             .await
             .blockchain
