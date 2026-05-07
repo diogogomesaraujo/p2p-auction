@@ -16,3 +16,9 @@ quando um node faz bootstrap manda tb uma gRPC a pedir a blockchain e constroi o
 o bootstrap node quando recebe uma connecção (connection established) envia a blockchain ao peer.
 o peer dá stall enquanto espera a resposta -> simples await
 o bootstrap node envia a blockchain assincronamente.
+
+
+------------------------------------------------------------------------------------------------------------------------
+
+a transaction pool deve ser HashMap<String, Transaction> onde o ID é a key
+isto remove problema quando created_at é igual -> elimina silenciosamente a transaction processada em primeiro lugar
