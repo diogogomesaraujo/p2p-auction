@@ -29,14 +29,14 @@ This sections specifies the protocol used to construct the blockchain layer, ins
 
 #### Hashes 
 
-Hashing is done using a single round of Blake2b encoding.
+Hashing is done using a single round of Blake2b.
 
 ```
 Input: I am not in danger, Skyler. I am the danger.
 Expected Output: 3a141d45dea6b8af5bab5f942d88f3c0d48edcda84fac341d821d13d65896e2a7d5a8ec921da654301e72db33631fd94963e064056172f4d970a77625aa7ed93
 ```
 
-Blocks and transactions are always JSON encoded before they are hashed.
+Blocks and transactions are always encoded in JSON before they are hashed.
 
 #### Signatures
 
