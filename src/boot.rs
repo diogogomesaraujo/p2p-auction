@@ -1,9 +1,9 @@
 use crate::{
     behaviour::{DhtBehaviour, Request, Response},
-    rpc::VirtualMachine,
     runtime::Runtime,
     state::State,
     topic,
+    vm::VirtualMachine,
 };
 use async_trait::async_trait;
 use libp2p::{

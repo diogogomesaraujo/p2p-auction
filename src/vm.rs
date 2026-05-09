@@ -16,6 +16,7 @@ use tracing::error;
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
+pub const MINE_SPEED: Duration = Duration::from_secs(3);
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
@@ -97,7 +98,7 @@ pub trait VirtualMachine {
                     if let Err(_) = tx.send(block) {
                         error!("Couldn't send the block.");
                     }
-                    sleep(Duration::from_secs(2)).await;
+                    sleep(MINE_SPEED).await;
                 }
             });
         }

@@ -3,10 +3,10 @@ pub mod blockchain;
 pub mod boot;
 pub mod key;
 pub mod node;
-pub mod rpc;
 pub mod runtime;
 pub mod state;
 pub mod time;
+pub mod vm;
 
 pub mod config {
     pub const CONFIG_DIR: &str = "config";

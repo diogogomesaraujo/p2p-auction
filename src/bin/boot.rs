@@ -1,4 +1,4 @@
-use blocktion::{boot::BootNode, key::get_key, rpc::VirtualMachine};
+use blocktion::{boot::BootNode, key::get_key, vm::VirtualMachine};
 use clap::Parser;
 use ed25519_dalek_blake2b::Keypair;
 use hex::ToHex;
