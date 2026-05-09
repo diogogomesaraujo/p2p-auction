@@ -1,6 +1,6 @@
 use crate::{
     behaviour::{DhtBehaviour, Request, Response},
-    rpc::{DhtRpc, LISTEN_ON},
+    rpc::{LISTEN_ON, VirtualMachine},
     runtime::Runtime,
     state::State,
     topic,
@@ -31,7 +31,7 @@ pub struct Node {
     pub bootstrap_nodes: Vec<(Multiaddr, PeerId)>,
 }
 
-pub enum RpcAction {
+pub enum VirtualMachineAction {
     Ping,
     FindNode,
     RoutingTable,
@@ -45,15 +45,15 @@ impl Node {
 }
 
 #[async_trait]
-impl DhtRpc for Node {
-    type RpcAction = RpcAction;
+impl VirtualMachine for Node {
+    type VirtualMachineAction = VirtualMachineAction;
 
-    fn action_from_str(action_text: &str) -> Option<Self::RpcAction> {
+    fn action_from_str(action_text: &str) -> Option<Self::VirtualMachineAction> {
         match action_text {
-            "PING" => Some(RpcAction::Ping),
-            "FIND_NODE" => Some(RpcAction::FindNode),
-            "ROUTING_TABLE" => Some(RpcAction::RoutingTable),
-            "CONNECTED_PEERS" => Some(RpcAction::ConnectedPeers),
+            "PING" => Some(VirtualMachineAction::Ping),
+            "FIND_NODE" => Some(VirtualMachineAction::FindNode),
+            "ROUTING_TABLE" => Some(VirtualMachineAction::RoutingTable),
+            "CONNECTED_PEERS" => Some(VirtualMachineAction::ConnectedPeers),
             _ => None,
         }
     }
@@ -231,27 +231,27 @@ impl DhtRpc for Node {
     fn match_action(
         args: &mut SplitWhitespace,
         runtime: &mut Runtime,
-        rpc: RpcAction,
+        rpc: VirtualMachineAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match rpc {
-            RpcAction::Ping => {
+            VirtualMachineAction::Ping => {
                 let address = Self::arg_parse(args)?.parse::<Multiaddr>()?;
                 runtime.swarm.dial(address)?;
             }
 
-            RpcAction::FindNode => {
+            VirtualMachineAction::FindNode => {
                 let peer = Self::arg_parse(args)?.parse::<PeerId>()?;
                 runtime.swarm.behaviour_mut().kad.get_closest_peers(peer);
             }
 
-            RpcAction::ConnectedPeers => {
+            VirtualMachineAction::ConnectedPeers => {
                 info!(
                     "Peers currently connected: {:?}",
                     runtime.swarm.connected_peers().collect::<Vec<&PeerId>>(),
                 );
             }
 
-            RpcAction::RoutingTable => {
+            VirtualMachineAction::RoutingTable => {
                 let local_key = KBucketKey::from(*runtime.swarm.local_peer_id());
 
                 for bucket in runtime.swarm.behaviour_mut().kad.kbuckets() {

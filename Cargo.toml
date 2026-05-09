@@ -20,7 +20,7 @@ tracing-subscriber = "0.3.22"
 hex = "0.4.3"
 blake2 = "0.10.6"
 ed25519-dalek-blake2b = "1.0.2"
-rand = { version = "0.8", features = ["std"] }
+rand = "0.8"
 
 # net
 libp2p = { version = "0.56.0", features = [

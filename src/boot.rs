@@ -1,6 +1,6 @@
 use crate::{
     behaviour::{DhtBehaviour, Request, Response},
-    rpc::DhtRpc,
+    rpc::VirtualMachine,
     runtime::Runtime,
     state::State,
     topic,
@@ -33,7 +33,7 @@ pub struct BootNode {
     pub multi_address: Multiaddr,
 }
 
-pub enum RpcAction {
+pub enum VirtualMachineAction {
     Ping,
     RoutingTable,
 }
@@ -48,13 +48,13 @@ impl BootNode {
 }
 
 #[async_trait]
-impl DhtRpc for BootNode {
-    type RpcAction = RpcAction;
+impl VirtualMachine for BootNode {
+    type VirtualMachineAction = VirtualMachineAction;
 
-    fn action_from_str(action_text: &str) -> Option<Self::RpcAction> {
+    fn action_from_str(action_text: &str) -> Option<Self::VirtualMachineAction> {
         match action_text {
-            "PING" => Some(RpcAction::Ping),
-            "ROUTING_TABLE" => Some(RpcAction::RoutingTable),
+            "PING" => Some(VirtualMachineAction::Ping),
+            "ROUTING_TABLE" => Some(VirtualMachineAction::RoutingTable),
             _ => None,
         }
     }
@@ -224,15 +224,15 @@ impl DhtRpc for BootNode {
     fn match_action(
         args: &mut SplitWhitespace,
         runtime: &mut Runtime,
-        rpc: RpcAction,
+        rpc: VirtualMachineAction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match rpc {
-            RpcAction::Ping => {
+            VirtualMachineAction::Ping => {
                 let address = Self::arg_parse(args)?.parse::<Multiaddr>()?;
                 runtime.swarm.dial(address)?;
             }
 
-            RpcAction::RoutingTable => {
+            VirtualMachineAction::RoutingTable => {
                 info!(
                     "Current state of the routing table: {:?}",
                     runtime.swarm.connected_peers().collect::<Vec<&PeerId>>(),

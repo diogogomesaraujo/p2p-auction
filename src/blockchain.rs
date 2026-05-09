@@ -672,8 +672,8 @@ impl Blockchain {
     /// Function that appends a block to the blockchain.
     pub fn propose_block(
         &mut self,
-        public_key: String,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        public_key: &str,
+    ) -> Result<Block, Box<dyn Error + Send + Sync>> {
         let transactions = self.transaction_pool.flush();
 
         if transactions.len() == 0 {
@@ -684,7 +684,7 @@ impl Blockchain {
 
         let previous_block_hash = self.insert_after();
         let block_to_append = Block::new(
-            public_key,
+            public_key.to_string(),
             previous_block_hash,
             transactions,
             self.difficulty,
@@ -706,8 +706,8 @@ impl Blockchain {
         hypothetical_blockchain.execute_transactions(&block_to_append)?;
 
         self.accounts = hypothetical_blockchain.accounts;
-        self.blocks.push(block_to_append);
-        Ok(())
+        self.blocks.push(block_to_append.clone());
+        Ok(block_to_append)
     }
 
     /// Function that verifies each block in the blockchain.
@@ -1108,7 +1108,7 @@ pub mod test {
         let pk = public_key_to_string(&k.public);
         let t = signed_create_account_tx(&k, 0)?;
         chain.transaction_pool.add_transaction(t)?;
-        chain.propose_block(pk.clone())?;
+        chain.propose_block(&pk)?;
         assert_eq!(chain.blocks.len(), 1);
         assert!(chain.verify()?);
         Ok(())
@@ -1121,7 +1121,7 @@ pub mod test {
         let mut chain = Blockchain::new(u32::MAX)?;
         let k = generate_keypair();
         let pk = public_key_to_string(&k.public);
-        assert!(chain.propose_block(pk).is_err());
+        assert!(chain.propose_block(&pk).is_err());
         Ok(())
     }
 
@@ -1134,7 +1134,7 @@ pub mod test {
         let pk = public_key_to_string(&k.public);
         let t = signed_create_account_tx(&k, 0)?;
         chain.transaction_pool.add_transaction(t)?;
-        chain.propose_block(pk.clone())?;
+        chain.propose_block(&pk)?;
         assert!(chain.get_account_by_id(&pk).is_some());
         Ok(())
     }
@@ -1148,7 +1148,7 @@ pub mod test {
             let pk = public_key_to_string(&k.public);
             let t = signed_create_account_tx(&k, 0)?;
             chain.transaction_pool.add_transaction(t)?;
-            chain.propose_block(pk)?;
+            chain.propose_block(&pk)?;
         }
         assert_eq!(chain.blocks.len(), 3);
         assert!(chain.verify()?);
@@ -1163,7 +1163,7 @@ pub mod test {
         let pk = public_key_to_string(&k.public);
         let t = signed_create_account_tx(&k, 0)?;
         chain.transaction_pool.add_transaction(t)?;
-        chain.propose_block(pk)?;
+        chain.propose_block(&pk)?;
         let before = chain.blocks.clone();
         chain.fix()?;
         assert_eq!(chain.blocks, before);
@@ -1247,7 +1247,7 @@ pub mod test {
             )?;
 
             blockchain.transaction_pool.add_transaction(t)?;
-            blockchain.propose_block(pk)?;
+            blockchain.propose_block(&pk)?;
         }
 
         // verify blockchain

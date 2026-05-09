@@ -1,6 +1,9 @@
-use blocktion::{key::get_key, node::Node, rpc::DhtRpc};
+use blocktion::{key::get_key, node::Node, rpc::VirtualMachine};
 use clap::Parser;
+use ed25519_dalek_blake2b::Keypair;
+use hex::ToHex;
 use libp2p::{Multiaddr, PeerId, StreamProtocol};
+use rand::rngs::OsRng;
 use std::error::Error;
 use tokio::io::{BufReader, stdin};
 
@@ -49,6 +52,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let node = Node::new(boot_nodes_from_str(&[(&args.boot_path, &args.boot_key)])?);
 
+    let keys = Keypair::generate(&mut OsRng);
+
     let mut i = node
         .init(
             IPFS_PROTO_NAME,
@@ -56,7 +61,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &format!("127.0.0.1:{}", args.rpc_port),
         )
         .await?;
-    Node::run(&mut i, BufReader::new(stdin())).await?;
+    Node::run(
+        &mut i,
+        &keys.public.encode_hex::<String>(),
+        BufReader::new(stdin()),
+    )
+    .await?;
 
     Ok(())
 }
