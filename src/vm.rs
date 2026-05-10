@@ -6,10 +6,10 @@ use async_trait::async_trait;
 use libp2p::{StreamProtocol, futures::StreamExt, identity::Keypair};
 use libp2p_gossipsub::IdentTopic;
 use serde_json::to_vec;
-use std::{error::Error, str::SplitWhitespace, time::Duration};
+use std::{error::Error, str::SplitWhitespace, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader, Stdin},
-    sync::mpsc,
+    sync::{RwLock, mpsc},
     time::sleep,
 };
 use tracing::error;
@@ -86,7 +86,9 @@ pub trait VirtualMachine {
 
         // mine block thread
         let (tx, mut rx) = mpsc::unbounded_channel::<Block>();
+        let tx = Arc::new(RwLock::new(tx));
         {
+            let tx = tx.clone();
             let state = runtime.state.clone();
             let public_key = public_key.to_string();
             tokio::spawn(async move {
@@ -95,7 +97,7 @@ pub trait VirtualMachine {
                         Ok(b) => b,
                         _ => continue,
                     };
-                    if let Err(_) = tx.send(block) {
+                    if let Err(_) = tx.write().await.send(block) {
                         error!("Couldn't send the block.");
                     }
                     sleep(NEW_BLOCK_SPEED).await;
@@ -118,12 +120,12 @@ pub trait VirtualMachine {
 
                 Some(block) = rx.recv() => {
                     tracing::info!("Proposing block: {:?}", block);
-                    while let Err(_) =  runtime.swarm
+                    if let Err(_) = runtime.swarm
                         .behaviour_mut()
                         .gossip
                         .publish(IdentTopic::new(BLOCKS), to_vec(&block)?) {
                             tracing::error!("No other peers to send proposed block to.");
-                            sleep(NEW_BLOCK_SPEED).await;
+                            tx.write().await.send(block)?;
                     }
                 }
             }

@@ -684,16 +684,6 @@ impl Blockchain {
             return Err("The block proposed does not point to the current chain tip.".into());
         }
 
-        if !block.transactions.iter().fold(true, |acc, t| {
-            let has = self.transaction_pool.contains(t);
-            self.transaction_pool.remove(t.id.clone());
-            acc && has
-        }) {
-            return Err(
-                "The block proposed contains transactions that are not in the mempool.".into(),
-            );
-        }
-
         if let None = self.get_account_by_id(&block.miner) {
             return Err("The block proposed has a non-existent miner account.".into());
         }

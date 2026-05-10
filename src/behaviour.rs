@@ -9,7 +9,7 @@ use crate::{
     topic,
 };
 use libp2p::{
-    identify, kad, ping, request_response,
+    PeerId, identify, kad, ping, request_response,
     swarm::{NetworkBehaviour, SwarmEvent},
 };
 use libp2p_gossipsub::{self as gossipsub};
@@ -129,6 +129,11 @@ impl DhtBehaviourEvent {
                     .kad
                     .add_address(&peer_id, endpoint.get_remote_address().clone());
 
+                info!(
+                    "Connected peers: {:?}",
+                    runtime.swarm.connected_peers().collect::<Vec<&PeerId>>()
+                );
+
                 let stage = runtime.state.read().await.stage.clone();
 
                 if stage == Stage::JustCreated {
@@ -171,6 +176,10 @@ impl DhtBehaviourEvent {
                     info!(
                         "RoutingUpdated peer={peer:?} is_new_peer={is_new_peer} \
                          addresses={addresses:?} bucket_range={bucket_range:?} old_peer={old_peer:?}"
+                    );
+                    info!(
+                        "Connected peers: {:?}",
+                        runtime.swarm.connected_peers().collect::<Vec<&PeerId>>()
                     );
                     let now = now_unix()?;
                     {
