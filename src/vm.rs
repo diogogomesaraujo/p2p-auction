@@ -105,7 +105,7 @@ pub trait VirtualMachine {
                     } else {
                         tracing::info!(
                             "Fixed chain successfully: {:?}",
-                            state.read().await.blockchain.hash_chain()
+                            state.read().await.blockchain.longest_chain
                         );
                     }
                     sleep(FIX_CHAIN_DELAY).await;
@@ -135,7 +135,6 @@ pub trait VirtualMachine {
         }
 
         {
-            let public_key = keys.public.encode_hex::<String>();
             let state = runtime.state.clone();
 
             tokio::spawn(async move {
@@ -148,9 +147,33 @@ pub trait VirtualMachine {
                     .add_transaction(
                         Transaction::sign(
                             Data::CreateUserAccount {
+                                public_key: keys.public.encode_hex::<String>(),
+                            },
+                            &keys.public.encode_hex::<String>(),
+                            0,
+                            &keys,
+                        )
+                        .expect("shouldn't fail"),
+                    )
+                {
+                    error!("Couldn't create the miner account");
+                }
+
+                sleep(Duration::from_secs(7)).await;
+
+                let keys = Keypair::generate(&mut rand::rngs::OsRng);
+
+                if let Err(_) = state
+                    .write()
+                    .await
+                    .blockchain
+                    .transaction_pool
+                    .add_transaction(
+                        Transaction::sign(
+                            Data::CreateUserAccount {
                                 public_key: keys.public.encode_hex(),
                             },
-                            &public_key,
+                            &keys.public.encode_hex::<String>(),
                             0,
                             &keys,
                         )

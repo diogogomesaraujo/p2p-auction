@@ -354,7 +354,6 @@ dependencies = [
  "hex",
  "libp2p",
  "libp2p-gossipsub",
- "num-bigint",
  "prost",
  "rand 0.8.5",
  "serde",
