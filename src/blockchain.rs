@@ -776,6 +776,31 @@ impl Blockchain {
         Ok(())
     }
 
+    fn has_previous_block(&self, previous_hash: &str) -> bool {
+        match self
+            .blocks
+            .iter()
+            .find(|b| b.previous_hash == previous_hash)
+        {
+            Some(_) => true,
+            _ => false,
+        }
+    }
+
+    fn miner_account_exists(&self, block: &Block) -> bool {
+        if let None = self.get_account_by_id(&block.miner) {
+            return false;
+        }
+
+        match block.transactions.iter().find(|t| match &t.record {
+            Data::CreateUserAccount { public_key } if public_key == &block.miner => true,
+            _ => false,
+        }) {
+            Some(_) => true,
+            _ => false,
+        }
+    }
+
     /// Function that accepts a block proposed by another node.
     pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
         if !block.verify()? {
@@ -783,32 +808,17 @@ impl Blockchain {
         }
 
         let prev_hash = match self.blocks.is_empty() {
-            false => match self
-                .blocks
-                .iter()
-                .find(|b| b.previous_hash == block.previous_hash)
-            {
-                Some(b) => Some(b.hash.clone()),
-                None => None,
-            },
-            true => Some("0".to_string()),
+            true => "0",
+            false => &block.previous_hash,
         };
 
-        if let None = prev_hash {
-            return Err("The block proposed does not point to the current chain tip.".into());
+        if !self.has_previous_block(prev_hash) {
+            return Err("The block proposed does not point to a block in the chain.".into());
         }
 
-        if let None = self.get_account_by_id(&block.miner) {
-            if let None = block.transactions.iter().find(|t| {
-                if let Data::CreateUserAccount { public_key } = &t.record {
-                    public_key == &block.miner
-                } else {
-                    false
-                }
-            }) {
-                return Err("The block proposed has a non-existent miner account.".into());
-            }
-        };
+        if self.miner_account_exists(&block) {
+            return Err("The block proposed has a non-existent miner account.".into());
+        }
 
         if let Err(e) = self.execute_transactions(&block) {
             return Err(format!("The block proposed contains invalid transactions. {e}").into());
@@ -831,10 +841,7 @@ impl Blockchain {
                 .iter()
                 .fold(chain[0].clone(), |(acc_prev_h, acc_h), (prev_h, h)| {
                     if prev_h == &acc_prev_h {
-                        (
-                            acc_prev_h,
-                            Self::choose_hash(&acc_h, h), // todo fix
-                        )
+                        (acc_prev_h, Self::choose_hash(&acc_h, h))
                     } else {
                         (prev_h.clone(), h.clone())
                     }
@@ -848,7 +855,7 @@ impl Blockchain {
         &mut self,
         public_key: &str,
     ) -> Result<Block, Box<dyn Error + Send + Sync>> {
-        let transactions = self.transaction_pool.flush();
+        let transactions = self.transaction_pool.flush(); // todo transactions that are rethrown need to be correctly evaluated
 
         if transactions.len() == 0 {
             return Err(
@@ -881,6 +888,7 @@ impl Blockchain {
 
         self.accounts = hypothetical_blockchain.accounts;
         self.blocks.push(block_to_append.clone());
+
         Ok(block_to_append)
     }
 
@@ -898,7 +906,7 @@ impl Blockchain {
     }
 
     /// Function that returns pairs of previous hash and hash for all the blocks in the chain.
-    fn hash_chain(&self) -> Vec<(String, String)> {
+    pub fn hash_chain(&self) -> Vec<(String, String)> {
         self.blocks
             .iter()
             .map(|b| (b.previous_hash.clone(), b.hash.clone()))
@@ -957,6 +965,7 @@ impl Blockchain {
                 if new_chain.contains(&b.hash) {
                     Ok([acc, vec![b.clone()]].concat())
                 } else {
+                    tracing::info!("LOOK HERE I AM ADDING A TRANSACTION ");
                     b.transactions
                         .iter()
                         .try_for_each(|t| self.transaction_pool.add_transaction(t.clone()))?;
@@ -982,10 +991,6 @@ pub trait WorldState {
 
 impl WorldState for Blockchain {
     fn create_account(&mut self, public_key: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if self.accounts.contains_key(public_key) {
-            return Err("Attempted to create duplicate account.".into());
-        };
-
         self.accounts.insert(
             public_key.to_string(),
             Account::new(account::Kind::User, public_key.to_string())?,
