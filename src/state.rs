@@ -58,13 +58,16 @@ impl Default for PeerInfo {
 }
 
 impl State {
-    pub fn init(rpc_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
+    pub fn init(rpc_address: &str, is_boot: bool) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             peers: HashMap::new(),
             blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
             received_blocks: HashMap::new(),
             rpc_address: SocketAddr::from_str(rpc_address)?,
-            stage: Stage::JustCreated,
+            stage: match is_boot {
+                true => Stage::Initialized,
+                false => Stage::JustCreated,
+            },
         })
     }
 }

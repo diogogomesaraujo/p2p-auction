@@ -64,7 +64,7 @@ impl VirtualMachine for Node {
         key: Keypair,
         rpc_address: &str,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
-        let state = State::init(rpc_address)?;
+        let state = State::init(rpc_address, false)?;
 
         let mut swarm = SwarmBuilder::with_existing_identity(key)
             .with_tokio()

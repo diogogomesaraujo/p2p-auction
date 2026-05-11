@@ -12,7 +12,6 @@
 use crate::blockchain::{
     account::Account,
     block::Block,
-    merkle::Side,
     transaction::{Data, Transaction, TransactionPool},
 };
 use blake2::Blake2b512;
@@ -158,17 +157,6 @@ pub mod merkle {
     use blake2::Digest;
     use std::{collections::VecDeque, error::Error};
 
-    /// Enum that represents the side of the sibling node in the tree.
-    /// Useful to build and verify Merkle proofs.
-    pub enum Side {
-        Left,
-        Right,
-    }
-
-    /// Type that represents a Merkle proof. It is a list of `(Side, hash)` pairs,
-    /// one per tree level, where each entry is the sibling hash needed to recompute the root.
-    type Proof = Vec<(String, Side)>;
-
     /// Function that returns the Merkle root of a given set of transactions.
     pub fn root<T: Hashable>(t: &[T]) -> Result<String, Box<dyn Error + Send + Sync>> {
         if t.is_empty() {
@@ -217,87 +205,6 @@ pub mod merkle {
         let input = format!("{}:{}", left, right);
         let h = hash::hash(HashFunction::new(), &input);
         Ok(hash::encode_hash(&h))
-    }
-
-    /// Function that produces the Merkle proof for the transaction at the given index.
-    /// Tree is treated internally as a queue, avoiding the need for a recursive type.
-    pub fn proof<T: Hashable>(
-        t_idx: usize,
-        t: &[T],
-    ) -> Result<Proof, Box<dyn Error + Send + Sync>> {
-        if t_idx > t.len() {
-            return Err("Transaction index was out of bounds".into());
-        }
-        let mut th = t[t_idx].hash()?;
-
-        let mut tmp: VecDeque<String> = VecDeque::new();
-        let mut pairs = t.chunks(2);
-        while let Some(pair) = pairs.next() {
-            match pair {
-                [l, r] => {
-                    let lh = l.hash()?;
-                    let rh = r.hash()?;
-                    tmp.push_back(hash(&lh, &rh)?);
-                }
-                [s] => {
-                    let sh = s.hash()?;
-                    tmp.push_back(hash(&sh, &sh)?);
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        let mut proof: Proof = Vec::new();
-
-        while tmp.len() > 1 {
-            let mut tmp2: VecDeque<String> = VecDeque::new();
-            loop {
-                match (tmp.pop_front(), tmp.pop_front()) {
-                    (Some(l), Some(r)) => {
-                        if l == th {
-                            proof.push((r.clone(), Side::Right));
-                        } else if r == th {
-                            proof.push((l.clone(), Side::Left));
-                        }
-                        th = hash(&l, &r)?;
-                        tmp2.push_back(th.clone());
-                    }
-                    (Some(s), None) => {
-                        if s == th {
-                            proof.push((s.clone(), Side::Left));
-                        }
-                        th = hash(&s, &s)?;
-                        tmp2.push_back(th.clone());
-                    }
-                    (None, _) => break,
-                }
-            }
-            tmp = tmp2;
-        }
-
-        match tmp.pop_front() {
-            Some(_) => Ok(proof),
-            _ => return Err("Failed to provide Merkle proof.".into()),
-        }
-    }
-
-    /// Function which verifies that the given transaction and Merkle proof correctly
-    /// produce the target Merkle root.
-    pub fn verify<T: Hashable>(
-        t: T,
-        root: String,
-        proof: Proof,
-    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
-        let result = proof.iter().try_fold(
-            t.hash()?,
-            |acc, (sibling, side)| -> Result<String, Box<dyn Error + Send + Sync>> {
-                match side {
-                    Side::Left => hash(sibling, &acc),
-                    Side::Right => hash(&acc, sibling),
-                }
-            },
-        )?;
-        Ok(result == root)
     }
 }
 
@@ -606,7 +513,7 @@ pub mod block {
         blockchain::{
             HashFunction,
             hash::{self, Hashable, encode_hash},
-            merkle::{self, Side},
+            merkle::{self},
             pow,
             transaction::Transaction,
         },
@@ -720,15 +627,6 @@ pub mod block {
             Ok(encode_hash(&h) == self.hash
                 && pow::verify(h)
                 && unsigned_block.merkle_root == self.merkle_root)
-        }
-
-        /// Function that returns the proof that a given transaction belongs to the block.
-        /// If the transaction doesn't belong to the block it returns Err.
-        pub fn provide_transaction_proof(
-            &self,
-            transaction_idx: usize,
-        ) -> Result<Vec<(String, Side)>, Box<dyn Error + Send + Sync>> {
-            merkle::proof(transaction_idx, &self.transactions)
         }
     }
 
@@ -924,10 +822,22 @@ impl Blockchain {
         }
     }
 
+    pub fn keep_transaction(&self, transaction: &Transaction) -> bool {
+        match self
+            .blocks
+            .iter()
+            .find(|b| b.transactions.contains(transaction))
+        {
+            Some(_) => true,
+            None => false,
+        }
+    }
+
     /// Function that removes bifurcations, throwing the transactions in the blocks of discarted branches
     /// back to the transaction pool.
     pub fn fix(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         // break the chain
+
         let mut map: HashMap<String, String> = HashMap::new();
         let chain = self.hash_chain();
         chain
@@ -959,20 +869,27 @@ impl Blockchain {
 
         // reconstruct blockchain
 
-        self.blocks = self.blocks.iter().try_fold(
-            vec![],
-            |acc, b| -> Result<Vec<Block>, Box<dyn Error + Send + Sync>> {
-                if new_chain.contains(&b.hash) {
-                    Ok([acc, vec![b.clone()]].concat())
-                } else {
-                    tracing::info!("LOOK HERE I AM ADDING A TRANSACTION ");
-                    b.transactions
-                        .iter()
-                        .try_for_each(|t| self.transaction_pool.add_transaction(t.clone()))?;
-                    Ok(acc)
-                }
-            },
-        )?;
+        let mut transactions_to_validate = vec![];
+
+        self.blocks = self.blocks.iter().fold(vec![], |acc, b| {
+            if new_chain.contains(&b.hash) {
+                [acc, vec![b.clone()]].concat()
+            } else {
+                b.transactions
+                    .iter()
+                    .for_each(|t| transactions_to_validate.push(t.clone()));
+                acc
+            }
+        });
+
+        // add transactions that are still valid to the transaction pool
+
+        transactions_to_validate.into_iter().try_for_each(|t| {
+            if self.keep_transaction(&t) {
+                self.transaction_pool.add_transaction(t)?;
+            }
+            Ok::<(), Box<dyn Error + Send + Sync>>(())
+        })?;
 
         Ok(())
     }

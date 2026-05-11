@@ -24,7 +24,10 @@ use tracing::error;
 
 pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
-pub const NEW_BLOCK_SPEED: Duration = Duration::from_secs(3);
+
+const NEW_BLOCK_SPEED: Duration = Duration::from_secs(3);
+const FIX_CHAIN_DELAY: Duration = Duration::from_secs(15);
+const REGISTER_MINER_DELAY: Duration = Duration::from_secs(4);
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
@@ -80,7 +83,7 @@ pub trait VirtualMachine {
 
     async fn run(
         runtime: &mut Runtime,
-        keys: &Keypair,
+        keys: Keypair,
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // rpc thread
@@ -89,6 +92,24 @@ pub trait VirtualMachine {
             tokio::spawn(async move {
                 state.run().await?;
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
+            });
+        }
+
+        // fix chain thread
+        {
+            let state = runtime.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    if let Err(e) = state.write().await.blockchain.fix() {
+                        error!("Couldn't fix the chain: {e}");
+                    } else {
+                        tracing::info!(
+                            "Fixed chain successfully: {:?}",
+                            state.read().await.blockchain.hash_chain()
+                        );
+                    }
+                    sleep(FIX_CHAIN_DELAY).await;
+                }
             });
         }
 
@@ -113,20 +134,33 @@ pub trait VirtualMachine {
             });
         }
 
-        runtime
-            .state
-            .write()
-            .await
-            .blockchain
-            .transaction_pool
-            .add_transaction(Transaction::sign(
-                Data::CreateUserAccount {
-                    public_key: keys.public.encode_hex(),
-                },
-                &keys.public.encode_hex::<String>(),
-                0,
-                keys,
-            )?)?;
+        {
+            let public_key = keys.public.encode_hex::<String>();
+            let state = runtime.state.clone();
+
+            tokio::spawn(async move {
+                sleep(REGISTER_MINER_DELAY).await;
+                if let Err(_) = state
+                    .write()
+                    .await
+                    .blockchain
+                    .transaction_pool
+                    .add_transaction(
+                        Transaction::sign(
+                            Data::CreateUserAccount {
+                                public_key: keys.public.encode_hex(),
+                            },
+                            &public_key,
+                            0,
+                            &keys,
+                        )
+                        .expect("shouldn't fail"),
+                    )
+                {
+                    error!("Couldn't create the miner account");
+                }
+            });
+        }
 
         let mut lines = buffer_reader.lines();
 
@@ -143,11 +177,11 @@ pub trait VirtualMachine {
 
                 Some(block) = rx.recv() => {
                     tracing::info!("Proposing block: {:?}", block);
-                    if let Err(_) = runtime.swarm
+                    if let Err(e) = runtime.swarm
                         .behaviour_mut()
                         .gossip
                         .publish(IdentTopic::new(BLOCKS), to_vec(&block)?) {
-                            // tracing::error!("No other peers to send proposed block to.");
+                            tracing::error!("Couldn't publish block: {e}");
                             sleep(Duration::from_secs(1)).await;
                             tx.write().await.send(block)?;
                     }

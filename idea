@@ -22,3 +22,8 @@ o bootstrap node envia a blockchain assincronamente.
 
 a transaction pool deve ser HashMap<String, Transaction> onde o ID é a key
 isto remove problema quando created_at é igual -> elimina silenciosamente a transaction processada em primeiro lugar
+
+
+TODO: when a node tries to fix the chain and rethrow the transactions they need to be evaluated to see
+if they are already in the chain and also only one of the nodes can post a block with those transactions
+|-> idea -> only the block that registered a transaction can rethrow it?

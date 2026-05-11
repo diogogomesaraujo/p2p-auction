@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             &format!("127.0.0.1:{}", args.rpc_port),
         )
         .await?;
-    Node::run(&mut i, &keys, BufReader::new(stdin())).await?;
+    Node::run(&mut i, keys, BufReader::new(stdin())).await?;
 
     Ok(())
 }

@@ -57,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let keys = Keypair::generate(&mut OsRng);
 
-    BootNode::run(&mut i, &keys, BufReader::new(stdin())).await?;
+    BootNode::run(&mut i, keys, BufReader::new(stdin())).await?;
 
     Ok(())
 }
