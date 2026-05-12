@@ -129,67 +129,17 @@ impl VirtualMachine for BootNode {
                     gossip_config,
                 )?;
 
-                // placeholder
                 let topic_score = TopicScoreParams::default();
-
-                // let mut topic_score = TopicScoreParams {
-                //     topic_weight: (),
-                //     time_in_mesh_weight: (),
-                //     time_in_mesh_quantum: (),
-                //     time_in_mesh_cap: (),
-                //     first_message_deliveries_weight: (),
-                //     first_message_deliveries_decay: (),
-                //     first_message_deliveries_cap: (),
-                //     mesh_message_deliveries_weight: (),
-                //     mesh_message_deliveries_decay: (),
-                //     mesh_message_deliveries_cap: (),
-                //     mesh_message_deliveries_threshold: (),
-                //     mesh_message_deliveries_window: (),
-                //     mesh_message_deliveries_activation: (),
-                //     mesh_failure_penalty_weight: (),
-                //     mesh_failure_penalty_decay: (),
-                //     invalid_message_deliveries_weight: (),
-                //     invalid_message_deliveries_decay: (),
-                // };
-
-                // placeholder
                 let mut peer_score = PeerScoreParams::default();
-
-                // let mut peer_score = PeerScoreParams {
-                //     topics: (),
-                //     topic_score_cap: (),
-                //     app_specific_weight: (),
-                //     ip_colocation_factor_weight: (),
-                //     ip_colocation_factor_threshold: (),
-                //     ip_colocation_factor_whitelist: (),
-                //     behaviour_penalty_weight: (),
-                //     behaviour_penalty_threshold: (),
-                //     behaviour_penalty_decay: (),
-                //     decay_interval: (),
-                //     decay_to_zero: (),
-                //     retain_score: (),
-                //     slow_peer_weight: (),
-                //     slow_peer_threshold: (),
-                //     slow_peer_decay: (),
-                // };
 
                 peer_score.topics.insert(
                     gossipsub::IdentTopic::new(topic::BLOCKS).hash(),
                     topic_score,
                 );
 
-                // placeholder
-                let _thresholds = PeerScoreThresholds::default();
+                let thresholds = PeerScoreThresholds::default();
 
-                // let thresholds = PeerScoreThresholds {
-                //     gossip_threshold: (),
-                //     publish_threshold: (),
-                //     graylist_threshold: (),
-                //     accept_px_threshold: (),
-                //     opportunistic_graft_threshold: (),
-                // };
-
-                //gossip.with_peer_score(peer_score, thresholds)?;
+                gossip.with_peer_score(peer_score, thresholds)?;
                 gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
 
                 /* Request Response */
