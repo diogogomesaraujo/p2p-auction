@@ -94,7 +94,7 @@ pub mod pow {
 
     /// Constant that represents the magic number used to define the difficulty of mineration.
     const TARGET: &[u8] = &[
-        0, 0, 0x0F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0,
     ];
 
@@ -211,7 +211,10 @@ pub mod transaction {
             ed25519::{signature_to_string, string_to_public_key, string_to_signature},
             hash::{self, Hashable},
         },
-        state,
+        state::{
+            self,
+            blockchain::{TransactionRequest, transaction_request},
+        },
         time::{Timestamp, now_unix},
     };
     use blake2::Digest;
@@ -252,6 +255,43 @@ pub mod transaction {
         },
     }
 
+    impl Into<transaction_request::Record> for Data {
+        fn into(self) -> transaction_request::Record {
+            match self {
+                Data::Bid {
+                    auction_id,
+                    from,
+                    amount,
+                } => transaction_request::Record::BidRequest(state::blockchain::Bid {
+                    auction_id,
+                    from,
+                    amount,
+                }),
+                Data::CreateAuction {
+                    auction_id,
+                    from,
+                    start_amount,
+                } => transaction_request::Record::CreateAuctionRequest(
+                    state::blockchain::CreateAuction {
+                        auction_id,
+                        from,
+                        start_amount,
+                    },
+                ),
+                Data::StopAuction { auction_id } => {
+                    transaction_request::Record::StopAuctionRequest(
+                        state::blockchain::StopAuction { auction_id },
+                    )
+                }
+                Data::CreateUserAccount { public_key } => {
+                    transaction_request::Record::CreateAccountRequest(
+                        state::blockchain::CreateAccount { public_key },
+                    )
+                }
+            }
+        }
+    }
+
     impl Into<state::blockchain::transaction::Record> for Data {
         fn into(self) -> state::blockchain::transaction::Record {
             match self {
@@ -285,6 +325,16 @@ pub mod transaction {
                         state::blockchain::CreateAccount { public_key },
                     )
                 }
+            }
+        }
+    }
+
+    impl Into<TransactionRequest> for Transaction {
+        fn into(self) -> TransactionRequest {
+            TransactionRequest {
+                signature: self.signature,
+                from: self.from,
+                record: Some(self.record.into()),
             }
         }
     }
@@ -453,39 +503,6 @@ pub mod transaction {
         pub fn contains(&self, transaction: &Transaction) -> bool {
             self.0.contains_key(&transaction.id) && self.0[&transaction.id] == *transaction
         }
-    }
-}
-
-/// Module that defines a blockchain user account.
-pub mod account {
-    use std::error::Error;
-
-    /// Struct that defines an account that can either be a user managed account or a smart contract operating independently.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct Account {
-        pub kind: Kind,
-        pub nonce: u64,
-        pub public_key: String,
-    }
-
-    /// Enum that represents the types of accounts that can be created in the blockchain.
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum Kind {
-        User,
-    }
-
-    impl Account {
-        /// Function that creates a new account.
-        pub fn new(kind: Kind, public_key: String) -> Result<Self, Box<dyn Error + Send + Sync>> {
-            Ok(Self {
-                kind,
-                nonce: 0,
-                public_key,
-            })
-        }
-
-        // verify the last confirmed nonce in blockchain for self address
-        // increment by one and sign transaction with it
     }
 }
 
@@ -663,6 +680,10 @@ impl Blockchain {
 
     /// Function that accepts a block proposed by another node.
     pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if let Some(_) = self.blocks.get(&block.hash) {
+            tracing::warn!("Already have block: {:?}", block);
+        }
+
         if !block.verify()? {
             return Err("The block proposed has an invalid hash.".into());
         }
@@ -670,6 +691,12 @@ impl Blockchain {
         if !self.has_previous_block(&block.previous_hash) {
             return Err("The block proposed does not point to a block in the chain.".into());
         }
+
+        if merkle::root(&block.transactions)? != block.merkle_root {
+            return Err("The order of transactions is wrong.".into());
+        }
+
+        self.verify()?;
 
         self.push_block(block);
 
@@ -681,7 +708,7 @@ impl Blockchain {
         &mut self,
         public_key: &str,
     ) -> Result<Block, Box<dyn Error + Send + Sync>> {
-        let transactions = self.transaction_pool.flush(); // todo transactions that are rethrown need to be correctly evaluated
+        let transactions = self.transaction_pool.flush();
 
         if transactions.len() == 0 {
             return Err(
@@ -731,13 +758,15 @@ impl Blockchain {
         let mut result = vec![prev_h.to_string()];
 
         if let Some(leaves) = branch_map.get(prev_h) {
-            let longest_chain = leaves
-                .iter()
-                .map(|leaf| Self::find_longest_branch(branch_map, leaf))
-                .max_by(|a, b| a.len().cmp(&b.len()))
-                .unwrap_or_default();
-
-            result.extend(longest_chain);
+            result = [
+                result,
+                leaves
+                    .iter()
+                    .map(|leaf| Self::find_longest_branch(branch_map, leaf))
+                    .max_by(|a, b| a.len().cmp(&b.len()))
+                    .unwrap_or_default(),
+            ]
+            .concat();
         }
 
         result

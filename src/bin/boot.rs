@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .init(
             IPFS_PROTO_NAME,
             self_key,
-            &format!("127.0.0.1:{}", args.rpc_port),
+            &format!("0.0.0.0:{}", args.rpc_port),
         )
         .await?;
 

@@ -27,7 +27,6 @@ pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
 const NEW_BLOCK_SPEED: Duration = Duration::from_secs(3);
 const FIX_CHAIN_DELAY: Duration = Duration::from_secs(15);
-const REGISTER_MINER_DELAY: Duration = Duration::from_secs(4);
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
@@ -87,6 +86,7 @@ pub trait VirtualMachine {
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // rpc thread
+
         {
             let state = runtime.state.clone();
             tokio::spawn(async move {
@@ -96,6 +96,7 @@ pub trait VirtualMachine {
         }
 
         // fix chain thread
+
         {
             let state = runtime.state.clone();
             tokio::spawn(async move {
@@ -114,6 +115,7 @@ pub trait VirtualMachine {
         }
 
         // mine block thread
+
         let (tx, mut rx) = mpsc::unbounded_channel::<Block>();
         let tx = Arc::new(RwLock::new(tx));
         {
@@ -122,10 +124,12 @@ pub trait VirtualMachine {
             let public_key: String = keys.public.encode_hex();
             tokio::spawn(async move {
                 loop {
-                    let block = match state.write().await.blockchain.propose_block(&public_key) {
+                    let mut chain = state.read().await.blockchain.clone();
+                    let block = match chain.propose_block(&public_key) {
                         Ok(b) => b,
                         _ => continue,
                     };
+                    state.write().await.blockchain = chain;
                     if let Err(_) = tx.write().await.send(block) {
                         error!("Couldn't send the block.");
                     }
@@ -134,56 +138,24 @@ pub trait VirtualMachine {
             });
         }
 
-        {
-            let state = runtime.state.clone();
+        // add miner account
 
-            tokio::spawn(async move {
-                sleep(REGISTER_MINER_DELAY).await;
-                if let Err(_) = state
-                    .write()
-                    .await
-                    .blockchain
-                    .transaction_pool
-                    .add_transaction(
-                        Transaction::sign(
-                            Data::CreateUserAccount {
-                                public_key: keys.public.encode_hex::<String>(),
-                            },
-                            &keys.public.encode_hex::<String>(),
-                            0,
-                            &keys,
-                        )
-                        .expect("shouldn't fail"),
-                    )
-                {
-                    error!("Couldn't create the miner account");
-                }
+        runtime
+            .state
+            .write()
+            .await
+            .blockchain
+            .transaction_pool
+            .add_transaction(Transaction::sign(
+                Data::CreateUserAccount {
+                    public_key: keys.public.encode_hex::<String>(),
+                },
+                &keys.public.encode_hex::<String>(),
+                0,
+                &keys,
+            )?)?;
 
-                sleep(Duration::from_secs(7)).await;
-
-                let keys = Keypair::generate(&mut rand::rngs::OsRng);
-
-                if let Err(_) = state
-                    .write()
-                    .await
-                    .blockchain
-                    .transaction_pool
-                    .add_transaction(
-                        Transaction::sign(
-                            Data::CreateUserAccount {
-                                public_key: keys.public.encode_hex(),
-                            },
-                            &keys.public.encode_hex::<String>(),
-                            0,
-                            &keys,
-                        )
-                        .expect("shouldn't fail"),
-                    )
-                {
-                    error!("Couldn't create the miner account");
-                }
-            });
-        }
+        // handle incomming messages and proposed blocks
 
         let mut lines = buffer_reader.lines();
 

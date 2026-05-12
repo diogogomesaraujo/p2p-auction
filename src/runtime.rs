@@ -30,33 +30,39 @@ impl Runtime {
     /// Function validates and appends to chain a block received over gossip protocol.
     /// If the block is valid it gossips the block.
     pub async fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let accepted_block = self
+        let accept_block = self
             .state
             .write()
             .await
             .blockchain
             .accept_block(block.clone());
-        if let Err(e) = accepted_block {
-            tracing::error!("{e}");
-            self.state
-                .write()
-                .await
-                .received_blocks
-                .insert(block.previous_hash.clone(), block.clone());
-            tracing::warn!("Storing block temporarily: {:?}", block);
-        } else {
-            tracing::info!("Accepted block: {:?}", block);
 
-            for (prev_h, block) in self.state.read().await.received_blocks.clone() {
-                let accepted_block = self
-                    .state
+        match accept_block {
+            Err(_) => {
+                self.state
                     .write()
                     .await
-                    .blockchain
-                    .accept_block(block.clone());
-                if let Ok(_) = accepted_block {
-                    tracing::info!("Accepted block: {:?}", block);
-                    self.state.write().await.received_blocks.remove(&prev_h);
+                    .received_blocks
+                    .insert(block.previous_hash.clone(), block.clone());
+
+                tracing::warn!("Storing block temporarily: {:?}", block);
+            }
+
+            Ok(_) => {
+                tracing::info!("Accepted block: {:?}", block);
+
+                for (prev_h, block) in self.state.read().await.received_blocks.clone() {
+                    let accepted_block = self
+                        .state
+                        .write()
+                        .await
+                        .blockchain
+                        .accept_block(block.clone());
+
+                    if let Ok(_) = accepted_block {
+                        tracing::info!("Accepted block: {:?}", block);
+                        self.state.write().await.received_blocks.remove(&prev_h);
+                    }
                 }
             }
         }
