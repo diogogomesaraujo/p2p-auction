@@ -129,17 +129,17 @@ impl VirtualMachine for BootNode {
                     gossip_config,
                 )?;
 
-                // let topic_score = TopicScoreParams::default();
-                // let mut peer_score = PeerScoreParams::default();
+                let topic_score = TopicScoreParams::default();
+                let mut peer_score = PeerScoreParams::default();
 
-                // peer_score.topics.insert(
-                //     gossipsub::IdentTopic::new(topic::BLOCKS).hash(),
-                //     topic_score,
-                // );
+                peer_score.topics.insert(
+                    gossipsub::IdentTopic::new(topic::BLOCKS).hash(),
+                    topic_score,
+                );
 
-                // let thresholds = PeerScoreThresholds::default();
+                let thresholds = PeerScoreThresholds::default();
 
-                // gossip.with_peer_score(peer_score, thresholds)?;
+                gossip.with_peer_score(peer_score, thresholds)?;
                 gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
 
                 /* Request Response */
