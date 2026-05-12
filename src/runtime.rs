@@ -22,11 +22,29 @@ impl Runtime {
         }
     }
 
-    pub async fn validate_blockchain(
+    pub async fn verify_boot_chain(
         &mut self,
         _blocks: Vec<Block>,
-    ) -> Result<State, Box<dyn Error + Send + Sync>> {
-        todo!()
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if _blocks.is_empty() {
+            return Ok(());
+        }
+
+        {
+            let mut state = self.state.write().await;
+
+            // state.blockchain.blocks.clear();
+            // state.blockchain.longest_chain.clear();
+            // let _ = state.blockchain.transaction_pool.flush();
+
+            for block in _blocks {
+                state.blockchain.accept_block(block)?;
+            }
+
+            state.blockchain.fix()?;
+        }
+
+        Ok(())
     }
 
     /// Function validates and appends to chain a block received over gossip protocol.

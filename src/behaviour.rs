@@ -4,7 +4,6 @@ use crate::{
         PUNISH_MALFORMED_BLOCK, PUNISH_PING_FAILURE, PUNISH_UNACCEPTED_BLOCK, REWARD_VALID_BLOCK,
     },
     runtime::Runtime,
-    state::Stage,
     time::now_unix,
     topic,
 };
@@ -96,21 +95,21 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                /*if runtime
-                    .state
-                    .write()
-                    .await
-                    .peers
-                    .get(&peer_id)
-                    .map_or(false, |p| p.blacklisted)
-                {
-                    runtime
-                        .swarm
-                        .behaviour_mut()
-                        .gossip
-                        .blacklist_peer(&peer_id);
-                    warn!("Rejecting blacklisted peer {:?}", peer_id);
-                }*/
+                // if runtime
+                //     .state
+                //     .write()
+                //     .await
+                //     .peers
+                //     .get(&peer_id)
+                //     .map_or(false, |p| p.blacklisted)
+                // {
+                //     runtime
+                //         .swarm
+                //         .behaviour_mut()
+                //         .gossip
+                //         .blacklist_peer(&peer_id);
+                //     warn!("Rejecting blacklisted peer {:?}", peer_id);
+                // }
 
                 let now = now_unix()?;
                 {
@@ -133,20 +132,6 @@ impl DhtBehaviourEvent {
                     "Connected peers: {:?}",
                     runtime.swarm.connected_peers().collect::<Vec<&PeerId>>()
                 );
-
-                let stage = runtime.state.read().await.stage.clone();
-
-                if stage == Stage::JustCreated {
-                    runtime
-                        .swarm
-                        .behaviour_mut()
-                        .request_response
-                        .send_request(&peer_id, Request::GetFullBlockchain);
-
-                    runtime.state.write().await.stage = Stage::RequestedBlockchain;
-
-                    info!("Requested full blockchain from {:?}", peer_id);
-                }
             }
 
             SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -378,96 +363,90 @@ impl DhtBehaviourEvent {
                 }
             },
 
-            //SwarmEvent::Behaviour(DhtBehaviourEvent::RequestResponse(event)) => match event {
-            /*request_response::Event::Message { peer, message, .. } => match message {
-                request_response::Message::Request {
-                    request, channel, ..
-                } => {
-                    let response = match request {
-                        Request::GetFullBlockchain => {
-                            info!("Peer {:?} requested full blockchain", peer);
-                            let longest_chain =
-                                runtime.state.read().await.blockchain.longest_chain.clone();
-                            let blocks = runtime.state.read().await.blockchain.blocks.clone();
-                            Response::Blocks(
-                                longest_chain.iter().map(|h| blocks[h].clone()).collect(),
-                            )
+            SwarmEvent::Behaviour(DhtBehaviourEvent::RequestResponse(event)) => match event {
+                request_response::Event::Message { peer, message, .. } => match message {
+                    request_response::Message::Request {
+                        request, channel, ..
+                    } => {
+                        let response = match request {
+                            Request::GetFullBlockchain => {
+                                info!("Peer {:?} requested full blockchain", peer);
+                                let longest_chain =
+                                    runtime.state.read().await.blockchain.longest_chain.clone();
+                                let blocks = runtime.state.read().await.blockchain.blocks.clone();
+                                Response::Blocks(
+                                    longest_chain.iter().map(|h| blocks[h].clone()).collect(),
+                                )
+                            }
+                            Request::GetFullBlockchainHash => {
+                                // consider saving blockchain hashes in Blockchain
+                                info!("Peer {:?} requested full chain of hashes", peer);
+                                let hashes =
+                                    runtime.state.read().await.blockchain.longest_chain.clone();
+                                Response::Hashes(hashes)
+                            }
+                        };
+                        if let Err(e) = runtime
+                            .swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_response(channel, response)
+                        {
+                            error!("Failed to send response to {:?}: {:?}", peer, e);
                         }
-                        Request::GetFullBlockchainHash => {
-                            // consider saving blockchain hashes in Blockchain
-                            info!("Peer {:?} requested full chain of hashes", peer);
-                            let hashes =
-                                runtime.state.read().await.blockchain.longest_chain.clone();
-                            Response::Hashes(hashes)
-                        }
-                    };
-                    if let Err(e) = runtime
-                        .swarm
-                        .behaviour_mut()
-                        .request_response
-                        .send_response(channel, response)
-                    {
-                        error!("Failed to send response to {:?}: {:?}", peer, e);
                     }
-                }
-                request_response::Message::Response { response, .. } => {
-                    match response {
-                        Response::Blocks(blocks) => {
-                            info!(
-                                "Received full blockchain from {:?} (lenght = {:?})",
-                                peer,
-                                blocks.len()
-                            );
-                            /*let blocks = blocks.clone();
-                            match runtime.validate_blockchain(blocks).await {
-                                Ok(validated) => {
-                                    {
-                                        let mut state = runtime.state.write().await;
-                                        *state = validated;
-                                        state.stage = Stage::Initialized;
+                    request_response::Message::Response { response, .. } => {
+                        match response {
+                            Response::Blocks(blocks) => {
+                                info!(
+                                    "Received full blockchain from {:?} (lenght = {:?})",
+                                    peer,
+                                    blocks.len()
+                                );
+                                let blocks = blocks.clone();
+                                match runtime.verify_boot_chain(blocks).await {
+                                    Ok(()) => {
+                                        info!(
+                                            "Accepted valid bootstrap blockchain from {:?}",
+                                            peer
+                                        );
                                     }
-                                    info!(
-                                        "Accepted valid bootstrap blockchain from {:?}",
-                                        peer
-                                    );
+                                    Err(e) => {
+                                        error!(
+                                            "Rejected invalid bootstrap blockchain from {:?}: {}",
+                                            peer, e
+                                        );
+                                    }
                                 }
-                                Err(e) => {
-                                    runtime.state.write().await.stage = Stage::JustCreated;
-                                    error!(
-                                        "Rejected invalid bootstrap blockchain from {:?}: {}",
-                                        peer, e
-                                    );
-                                }
-                            }*/
-                        }
-                        Response::Hashes(hashes) => {
-                            // verify against blockchain
-                            // assess and do whatever
-                            // if trusted maybe try to understand if our blockchain isn't main one and replace
-                            // if not trusted and disseminating a malicious blockchain lower reputation score
-                            info!(
-                                "Received full chain of hashes from {:?} (length = {:?})",
-                                peer,
-                                hashes.len()
-                            );
+                            }
+                            Response::Hashes(hashes) => {
+                                // verify against blockchain
+                                // assess and do whatever
+                                // if trusted maybe try to understand if our blockchain isn't main one and replace
+                                // if not trusted and disseminating a malicious blockchain lower reputation score
+                                info!(
+                                    "Received full chain of hashes from {:?} (length = {:?})",
+                                    peer,
+                                    hashes.len()
+                                );
 
-                            // depending on case act accordingly
+                                // depending on case act accordingly
+                            }
                         }
                     }
+                },
+                request_response::Event::OutboundFailure { peer, error, .. } => {
+                    warn!("Outbound request failure to {:?}: {:?}", peer, error);
+                }
+
+                request_response::Event::InboundFailure { peer, error, .. } => {
+                    warn!("Inbound request failure from {:?}: {:?}", peer, error);
+                }
+
+                request_response::Event::ResponseSent { peer, .. } => {
+                    info!("Response sent to {:?}", peer);
                 }
             },
-            request_response::Event::OutboundFailure { peer, error, .. } => {
-                warn!("Outbound request failure to {:?}: {:?}", peer, error);
-            }
-
-            request_response::Event::InboundFailure { peer, error, .. } => {
-                warn!("Inbound request failure from {:?}: {:?}", peer, error);
-            }
-
-            request_response::Event::ResponseSent { peer, .. } => {
-                info!("Response sent to {:?}", peer);
-            }*/
-            //},
             _ => {}
         }
 

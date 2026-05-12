@@ -53,39 +53,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         )
         .await?;
 
-    // _seed_valid_test_chain(&mut i, args.seed_blocks).await?;
-
     let keys = Keypair::generate(&mut OsRng);
 
     BootNode::run(&mut i, keys, BufReader::new(stdin())).await?;
-
-    Ok(())
-}
-
-async fn _seed_valid_test_chain(
-    runtime: &mut Runtime,
-    count: u32,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut state = runtime.state.write().await;
-
-    for n in 0..count {
-        let keys = Keypair::generate(&mut OsRng);
-        let pk = public_key_to_string(&keys.public);
-
-        let tx = Transaction::sign(
-            Data::CreateUserAccount {
-                public_key: pk.clone(),
-            },
-            &pk,
-            n,
-            &keys,
-        )?;
-
-        state.blockchain.transaction_pool.add_transaction(tx)?;
-        // state.blockchain.propose_block(&pk)?;
-
-        println!("Seeded block {}/{}", n + 1, count);
-    }
 
     Ok(())
 }

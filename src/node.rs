@@ -225,6 +225,16 @@ impl VirtualMachine for Node {
         let mut runtime = Runtime::new(swarm, state);
         runtime.load_from_local().await?;
 
+        if let Some(boot) = self.bootstrap_nodes.first() {
+            runtime
+                .swarm
+                .behaviour_mut()
+                .request_response
+                .send_request(&boot.1, Request::GetFullBlockchain);
+
+            info!("Requested bootstrap blockchain from {:?}", boot.1);
+        }
+
         Ok(runtime)
     }
 
