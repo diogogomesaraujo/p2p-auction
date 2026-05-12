@@ -1,13 +1,4 @@
-use blocktion::{
-    blockchain::{
-        ed25519::public_key_to_string,
-        transaction::{Data, Transaction},
-    },
-    boot::BootNode,
-    key::get_key,
-    runtime::Runtime,
-    vm::VirtualMachine,
-};
+use blocktion::{boot::BootNode, key::get_key, vm::VirtualMachine};
 use clap::Parser;
 use ed25519_dalek_blake2b::Keypair;
 use libp2p::StreamProtocol;

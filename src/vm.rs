@@ -26,7 +26,6 @@ pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
 const NEW_BLOCK_SPEED: Duration = Duration::from_secs(3);
-const FIX_CHAIN_DELAY: Duration = Duration::from_secs(15);
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
@@ -85,6 +84,20 @@ pub trait VirtualMachine {
         keys: Keypair,
         buffer_reader: BufReader<Stdin>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // show blockchain
+        {
+            let state = runtime.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    sleep(Duration::from_secs(10)).await;
+                    tracing::info!(
+                        "Blockchain state is currently: {:?}",
+                        state.read().await.blockchain.longest_chain
+                    );
+                }
+            });
+        }
+
         // rpc thread
 
         {
@@ -92,25 +105,6 @@ pub trait VirtualMachine {
             tokio::spawn(async move {
                 state.run().await?;
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
-            });
-        }
-
-        // fix chain thread
-
-        {
-            let state = runtime.state.clone();
-            tokio::spawn(async move {
-                loop {
-                    if let Err(e) = state.write().await.blockchain.fix() {
-                        error!("Couldn't fix the chain: {e}");
-                    } else {
-                        tracing::info!(
-                            "Fixed chain successfully: {:?}",
-                            state.read().await.blockchain.longest_chain
-                        );
-                    }
-                    sleep(FIX_CHAIN_DELAY).await;
-                }
             });
         }
 
@@ -155,7 +149,7 @@ pub trait VirtualMachine {
                 &keys,
             )?)?;
 
-        // handle incomming messages and proposed blocks
+        // handle incoming messages and proposed blocks
 
         let mut lines = buffer_reader.lines();
 
