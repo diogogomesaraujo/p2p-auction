@@ -700,6 +700,8 @@ impl Blockchain {
 
         self.push_block(block);
 
+        self.fix()?;
+
         Ok(())
     }
 
