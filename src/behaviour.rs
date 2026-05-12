@@ -95,21 +95,21 @@ impl DhtBehaviourEvent {
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => {
-                // if runtime
-                //     .state
-                //     .write()
-                //     .await
-                //     .peers
-                //     .get(&peer_id)
-                //     .map_or(false, |p| p.blacklisted)
-                // {
-                //     runtime
-                //         .swarm
-                //         .behaviour_mut()
-                //         .gossip
-                //         .blacklist_peer(&peer_id);
-                //     warn!("Rejecting blacklisted peer {:?}", peer_id);
-                // }
+                if runtime
+                    .state
+                    .write()
+                    .await
+                    .peers
+                    .get(&peer_id)
+                    .map_or(false, |p| p.blacklisted)
+                {
+                    runtime
+                        .swarm
+                        .behaviour_mut()
+                        .gossip
+                        .blacklist_peer(&peer_id);
+                    warn!("Rejecting blacklisted peer {:?}", peer_id);
+                }
 
                 let now = now_unix()?;
                 {
@@ -403,8 +403,7 @@ impl DhtBehaviourEvent {
                                     peer,
                                     blocks.len()
                                 );
-                                let blocks = blocks.clone();
-                                match runtime.verify_boot_chain(blocks).await {
+                                match runtime.verify_boot_chain(blocks.clone()).await {
                                     Ok(()) => {
                                         info!(
                                             "Accepted valid bootstrap blockchain from {:?}",
