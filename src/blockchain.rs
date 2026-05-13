@@ -249,6 +249,7 @@ pub mod transaction {
             auction_id: String,
             from: String,
             start_amount: u64,
+            stop_time: Timestamp,
         },
         StopAuction {
             auction_id: String,
@@ -271,11 +272,13 @@ pub mod transaction {
                     auction_id,
                     from,
                     start_amount,
+                    stop_time,
                 } => transaction_request::Record::CreateAuctionRequest(
                     state::blockchain::CreateAuction {
                         auction_id,
                         from,
                         start_amount,
+                        stop_time,
                     },
                 ),
                 Data::StopAuction { auction_id } => {
@@ -308,11 +311,13 @@ pub mod transaction {
                     auction_id,
                     from,
                     start_amount,
+                    stop_time,
                 } => state::blockchain::transaction::Record::CreateAuctionRequest(
                     state::blockchain::CreateAuction {
                         auction_id,
                         from,
                         start_amount,
+                        stop_time,
                     },
                 ),
                 Data::StopAuction { auction_id } => {

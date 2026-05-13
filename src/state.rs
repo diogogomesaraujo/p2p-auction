@@ -121,12 +121,14 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 auction_id,
                 from,
                 start_amount,
+                stop_time,
             }) => {
                 match Transaction::new(
                     Data::CreateAuction {
                         auction_id,
                         from,
                         start_amount,
+                        stop_time,
                     },
                     t.from,
                     0,

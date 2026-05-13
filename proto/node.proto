@@ -17,6 +17,7 @@ message CreateAuction {
   string auction_id = 1;
   string from = 2;
   uint64 start_amount = 3;
+  uint64 stop_time = 4;
 }
 
 message StopAuction {

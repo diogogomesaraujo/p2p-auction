@@ -1,13 +1,17 @@
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::{
     error::Error,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 pub type Timestamp = u64;
 
 pub fn now_unix() -> Result<Timestamp, Box<dyn Error + Send + Sync>> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())
+}
+
+pub fn now_unix_plus(added_time: Duration) -> Result<Timestamp, Box<dyn Error + Send + Sync>> {
+    Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + added_time.as_secs())
 }
 
 pub struct Poisson<R: Rng + ?Sized> {

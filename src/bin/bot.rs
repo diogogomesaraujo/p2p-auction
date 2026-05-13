@@ -3,7 +3,7 @@ use std::{error::Error, time::Duration};
 use blocktion::{
     blockchain::transaction::{Data, Transaction},
     state::blockchain::node_rpc_service_client::NodeRpcServiceClient,
-    time::Poisson,
+    time::{Poisson, now_unix_plus},
 };
 use clap::Parser;
 use ed25519_dalek_blake2b::Keypair;
@@ -32,6 +32,7 @@ async fn gen_request(
                     auction_id: OsRng.next_u32().to_string(),
                     from: OsRng.next_u32().to_string(),
                     start_amount: OsRng.next_u64(),
+                    stop_time: now_unix_plus(Duration::from_secs(OsRng.next_u64()))?,
                 },
                 &keys.public.encode_hex::<String>(),
                 0,
