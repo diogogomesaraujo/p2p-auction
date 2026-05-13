@@ -18,14 +18,14 @@ use std::error::Error;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Request {
-    GetLongestChain,
-    GetLongestChainHashes,
+pub enum LongestChainRequest {
+    Blocks,
+    Hashes,
     // GetBlockByHash,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Response {
+pub enum LongestChainResponse {
     Blocks(Vec<Block>),
     Hashes(Vec<String>),
 }
@@ -38,7 +38,8 @@ pub struct DhtBehaviour {
     pub ping: ping::Behaviour,
     pub identify: identify::Behaviour,
     pub gossip: gossipsub::Behaviour,
-    pub request_response: request_response::cbor::Behaviour<Request, Response>,
+    pub request_response:
+        request_response::cbor::Behaviour<LongestChainRequest, LongestChainResponse>,
 }
 
 /// Struct that represents a DHT event.
@@ -48,7 +49,7 @@ pub enum DhtBehaviourEvent {
     Ping(ping::Event),
     Identify(Box<identify::Event>),
     Gossip(gossipsub::Event),
-    RequestResponse(request_response::Event<Request, Response>),
+    RequestResponse(request_response::Event<LongestChainRequest, LongestChainResponse>),
 }
 
 impl From<kad::Event> for DhtBehaviourEvent {
@@ -75,8 +76,10 @@ impl From<gossipsub::Event> for DhtBehaviourEvent {
     }
 }
 
-impl From<request_response::Event<Request, Response>> for DhtBehaviourEvent {
-    fn from(event: request_response::Event<Request, Response>) -> Self {
+impl From<request_response::Event<LongestChainRequest, LongestChainResponse>>
+    for DhtBehaviourEvent
+{
+    fn from(event: request_response::Event<LongestChainRequest, LongestChainResponse>) -> Self {
         Self::RequestResponse(event)
     }
 }
@@ -369,21 +372,20 @@ impl DhtBehaviourEvent {
                         request, channel, ..
                     } => {
                         let response = match request {
-                            Request::GetLongestChain => {
+                            LongestChainRequest::Blocks => {
                                 info!("Peer {:?} requested bootstrap blocks", peer);
                                 let longest_chain =
                                     runtime.state.read().await.blockchain.longest_chain.clone();
                                 let blocks = runtime.state.read().await.blockchain.blocks.clone();
-                                Response::Blocks(
+                                LongestChainResponse::Blocks(
                                     longest_chain.iter().map(|h| blocks[h].clone()).collect(),
                                 )
                             }
-                            Request::GetLongestChainHashes => {
-                                // consider saving blockchain hashes in Blockchain
+                            LongestChainRequest::Hashes => {
                                 info!("Peer {:?} requested full chain of hashes", peer);
                                 let hashes =
                                     runtime.state.read().await.blockchain.longest_chain.clone();
-                                Response::Hashes(hashes)
+                                LongestChainResponse::Hashes(hashes)
                             }
                         };
                         if let Err(e) = runtime
@@ -397,7 +399,7 @@ impl DhtBehaviourEvent {
                     }
                     request_response::Message::Response { response, .. } => {
                         match response {
-                            Response::Blocks(blocks) => {
+                            LongestChainResponse::Blocks(blocks) => {
                                 info!("Received bootstrap blocks from {:?}", peer);
                                 match runtime.process_blocks(blocks.clone()).await {
                                     Ok(()) => {
@@ -415,7 +417,7 @@ impl DhtBehaviourEvent {
                                     }
                                 }
                             }
-                            Response::Hashes(hashes) => {
+                            LongestChainResponse::Hashes(hashes) => {
                                 // verify against blockchain
                                 // assess and do whatever
                                 // if trusted maybe try to understand if our blockchain isn't main one and replace
@@ -425,6 +427,35 @@ impl DhtBehaviourEvent {
                                     peer,
                                     hashes.len()
                                 );
+                                let longest_chain =
+                                    runtime.state.read().await.blockchain.longest_chain.clone();
+                                if hashes == longest_chain {
+                                    info!(
+                                        "Longest chain matches longest chain from peer {:?} completely",
+                                        peer
+                                    );
+                                } else {
+                                    let mut n = 1; // number of equal blocks from start
+                                    while n <= hashes.len() && n <= longest_chain.len() {
+                                        if hashes[n - 1] != longest_chain[n - 1] {
+                                            break;
+                                        }
+                                        n += 1;
+                                    }
+                                    info!(
+                                        "Longest chain matches {:?}/{:?} longest chain from peer {:?}",
+                                        n,
+                                        longest_chain.len(),
+                                        peer
+                                    );
+                                    if hashes.len() != longest_chain.len() {
+                                        warn!(
+                                            "Note that longest chain is of length {:?} and longest chain from peer is of length {:?}",
+                                            longest_chain.len(),
+                                            hashes.len()
+                                        );
+                                    }
+                                }
 
                                 // depending on case act accordingly
                             }

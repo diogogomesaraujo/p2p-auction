@@ -1,5 +1,5 @@
 use crate::{
-    behaviour::{DhtBehaviour, Request, Response},
+    behaviour::{DhtBehaviour, LongestChainRequest, LongestChainResponse},
     runtime::Runtime,
     state::State,
     topic,
@@ -143,7 +143,10 @@ impl VirtualMachine for Node {
 
                 /* Request Response */
 
-                let request_response = request_response::cbor::Behaviour::<Request, Response>::new(
+                let request_response = request_response::cbor::Behaviour::<
+                    LongestChainRequest,
+                    LongestChainResponse,
+                >::new(
                     [(
                         StreamProtocol::new("/blockchain/cbor/1"),
                         ProtocolSupport::Full,
@@ -180,7 +183,7 @@ impl VirtualMachine for Node {
                 .swarm
                 .behaviour_mut()
                 .request_response
-                .send_request(&boot.1, Request::GetLongestChain);
+                .send_request(&boot.1, LongestChainRequest::Blocks);
         }
 
         Ok(runtime)
