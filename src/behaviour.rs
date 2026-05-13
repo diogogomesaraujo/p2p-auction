@@ -14,7 +14,7 @@ use libp2p::{
 use libp2p_gossipsub::{self as gossipsub};
 use serde::{Deserialize, Serialize};
 use serde_json::from_slice;
-use std::{cmp::max, error::Error, hash::Hash};
+use std::error::Error;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
