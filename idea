@@ -2,3 +2,5 @@
 - when node doesn't know previous block asks for it.
 - smallest hash logic and epoch to see if a block with smaller hash appeared after the commited block use that instead.
 - stake -> blocks commited == computation - if block is malicious cut reputation by half. (constant reputation gain, linear-inverse reputation loss)
+- stake punish is a transaction
+- reward is a function that analyses the longest chain

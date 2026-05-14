@@ -14,7 +14,10 @@ use crate::blockchain::{
     transaction::{Transaction, TransactionPool},
 };
 use blake2::Blake2b512;
-use std::{collections::HashMap, error::Error};
+use num_bigint::BigUint;
+use std::{cmp::Ordering, collections::HashMap, error::Error};
+
+const EXECUTE_AFTER_N_BLOCKS: usize = 0;
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
 ///
@@ -636,6 +639,7 @@ pub mod block {
 pub struct Blockchain {
     pub blocks: HashMap<String, Block>,
     pub longest_chain: Vec<String>,
+    pub commited_pointer: usize,
     pub transaction_pool: TransactionPool,
     pub difficulty: u32,
 }
@@ -647,6 +651,7 @@ impl Blockchain {
             transaction_pool: TransactionPool::new(),
             blocks: HashMap::new(),
             longest_chain: vec![],
+            commited_pointer: 0,
             difficulty,
         })
     }
@@ -749,8 +754,22 @@ impl Blockchain {
             .any(|(_, b)| b.transactions.contains(transaction))
     }
 
-    fn find_longest_branch(branch_map: &HashMap<String, Vec<String>>, prev_h: &str) -> Vec<String> {
+    fn find_longest_branch(
+        branch_map: &HashMap<String, Vec<String>>,
+        prev_h: &str,
+    ) -> (Vec<String>, usize) {
         let mut result = vec![prev_h.to_string()];
+
+        fn min_hash(a: &str, b: &str) -> Ordering {
+            let a = BigUint::from_bytes_le(
+                &hex::decode(a).expect("Shouldn't be able to get hashes that are not in hex!"),
+            );
+            let b = BigUint::from_bytes_le(
+                &hex::decode(b).expect("Shouldn't be able to get hashes that are not in hex!"),
+            );
+
+            a.cmp(&b)
+        }
 
         if let Some(leaves) = branch_map.get(prev_h) {
             result = [
@@ -758,13 +777,22 @@ impl Blockchain {
                 leaves
                     .iter()
                     .map(|leaf| Self::find_longest_branch(branch_map, leaf))
-                    .max_by(|a, b| a.len().cmp(&b.len()))
-                    .unwrap_or_default(),
+                    .max_by(|(a, ca), (b, cb)| {
+                        if ca < &EXECUTE_AFTER_N_BLOCKS && cb < &EXECUTE_AFTER_N_BLOCKS {
+                            a.len().cmp(&b.len())
+                        } else {
+                            min_hash(&a[0], &b[0])
+                        }
+                    })
+                    .unwrap_or_default()
+                    .0,
             ]
             .concat();
         }
 
-        result
+        let len = result.len() + 1;
+
+        (result, len)
     }
 
     pub fn fix(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -781,7 +809,7 @@ impl Blockchain {
 
         // find longest chain
 
-        self.longest_chain = Self::find_longest_branch(&branch_map, "0")[1..].to_vec();
+        self.longest_chain = Self::find_longest_branch(&branch_map, "0").0[1..].to_vec();
 
         Ok(())
     }

@@ -15,8 +15,7 @@ use libp2p::{
     tcp, yamux,
 };
 use libp2p_gossipsub::{
-    self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, PeerScoreParams,
-    PeerScoreThresholds, TopicScoreParams, ValidationMode,
+    self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
 };
 use std::{
     collections::hash_map::DefaultHasher,
