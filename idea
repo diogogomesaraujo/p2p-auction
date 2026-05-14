@@ -4,3 +4,47 @@
 - stake -> blocks commited == computation - if block is malicious cut reputation by half. (constant reputation gain, linear-inverse reputation loss)
 - stake punish is a transaction
 - reward is a function that analyses the longest chain
+
+GENERAL idea
+
+    accept block
+        all good -> fix
+        fails -> request longest chain
+                    -> receive
+                        -> request missing blocks
+                            -> receive
+                                -> for loop with accept block on all received
+                                -> fix()
+    garbage_collect()
+     -> on every epoch
+     -> take the nth last epoch and remove all associated blocks and add their hashes to garbage
+
+     accept_block (blockchain)
+        -> ignore if any block in garbage is parent
+
+
+
+
+
+
+
+
+
+security:
+    -> peers can lie about chains but they cannot fake valid PoW cheaply
+        -> to handle endlessly waiting for blockchain (might even be endless blockchain)
+            -> valid header chain -> might be important to pass headers instead of hashes
+            -> highest cumulative work
+            -> valid full blocks
+            -> fork not deeper than commit pointer !!! for now... up to commit is written in stone
+
+possible security approach:
+    -> 1. Validate every header PoW before requesting blocks
+    -> 2. Use cumulative work, not claimed height (how?)
+    -> 3. Limit header sync length
+    -> 4. Limit orphan blocks per peer.
+    -> 5. Limit missing-parent depth.
+    -> 6. Timeout block/header requests.
+    -> 7. Reject forks before commit pointer.
+    -> 8. Punish peers for invalid headers, invalid blocks, broken chains, or repeated missing data.
+    -> 9. Never block forever waiting for one peer.

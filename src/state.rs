@@ -10,7 +10,7 @@ use crate::state::blockchain::{
 use crate::{blockchain::Blockchain, reputation::INITIAL_PEER_SCORE, time::Timestamp};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::str::FromStr;
@@ -26,6 +26,7 @@ pub struct State {
     pub peers: HashMap<PeerId, PeerInfo>,
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
+    pub pruned_blocks: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +57,7 @@ impl State {
             blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
             received_blocks: HashMap::new(),
             rpc_address: SocketAddr::from_str(rpc_address)?,
+            pruned_blocks: HashSet::new(),
         })
     }
 }

@@ -46,6 +46,15 @@ impl Runtime {
     /// Function validates and appends to chain a block received over gossip protocol.
     /// If the block is valid it gossips the block.
     pub async fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let pruned = self.state.read().await.pruned_blocks.clone();
+        if pruned.contains(&block.hash) {
+            return Err("Rejected block preemptively because it was pruned".into());
+        }
+
+        if pruned.contains(&block.previous_hash) {
+            return Err("Rejected block preemptively because it's parent was pruned".into());
+        }
+
         let accept_block = self
             .state
             .write()
