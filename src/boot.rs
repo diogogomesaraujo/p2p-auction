@@ -1,5 +1,5 @@
 use crate::{
-    behaviour::{DhtBehaviour, LongestChainRequest, LongestChainResponse},
+    behaviour::{DhtBehaviour, Request, Response},
     runtime::Runtime,
     state::State,
     topic,
@@ -143,10 +143,7 @@ impl VirtualMachine for BootNode {
 
                 /* Request Response */
 
-                let request_response = request_response::cbor::Behaviour::<
-                    LongestChainRequest,
-                    LongestChainResponse,
-                >::new(
+                let request_response = request_response::cbor::Behaviour::<Request, Response>::new(
                     [(
                         StreamProtocol::new("/blockchain/cbor/1"),
                         ProtocolSupport::Full,

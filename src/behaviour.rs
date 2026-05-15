@@ -18,16 +18,17 @@ use std::error::Error;
 use tracing::{error, info, warn};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum LongestChainRequest {
-    Blocks,
-    Hashes,
-    // GetBlockByHash,
+pub enum Request {
+    LongestChainBlocks,
+    LongestChainHashes,
+    BlocksByHashes(Vec<String>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum LongestChainResponse {
-    Blocks(Vec<Block>),
-    Hashes(Vec<String>),
+pub enum Response {
+    LongestChainBlocks(Vec<Block>),
+    LongestChainHashes(Vec<String>),
+    BlocksByHashes(Vec<Block>), //used to request missing blocks
 }
 
 /// Struct that represents the `libp2p` primitives used to construct the DHT.
@@ -38,8 +39,7 @@ pub struct DhtBehaviour {
     pub ping: ping::Behaviour,
     pub identify: identify::Behaviour,
     pub gossip: gossipsub::Behaviour,
-    pub request_response:
-        request_response::cbor::Behaviour<LongestChainRequest, LongestChainResponse>,
+    pub request_response: request_response::cbor::Behaviour<Request, Response>,
 }
 
 /// Struct that represents a DHT event.
@@ -49,7 +49,7 @@ pub enum DhtBehaviourEvent {
     Ping(ping::Event),
     Identify(Box<identify::Event>),
     Gossip(gossipsub::Event),
-    RequestResponse(request_response::Event<LongestChainRequest, LongestChainResponse>),
+    RequestResponse(request_response::Event<Request, Response>),
 }
 
 impl From<kad::Event> for DhtBehaviourEvent {
@@ -76,10 +76,8 @@ impl From<gossipsub::Event> for DhtBehaviourEvent {
     }
 }
 
-impl From<request_response::Event<LongestChainRequest, LongestChainResponse>>
-    for DhtBehaviourEvent
-{
-    fn from(event: request_response::Event<LongestChainRequest, LongestChainResponse>) -> Self {
+impl From<request_response::Event<Request, Response>> for DhtBehaviourEvent {
+    fn from(event: request_response::Event<Request, Response>) -> Self {
         Self::RequestResponse(event)
     }
 }
@@ -312,7 +310,7 @@ impl DhtBehaviourEvent {
 
                     match from_slice::<Block>(&message.data) {
                         Ok(block) => {
-                            if let Err(e) = runtime.accept_block(block).await {
+                            if let Err(e) = runtime.accept_block(block, propagation_source).await {
                                 error!("Failed to accept block from {:?}: {e}", propagation_source);
                                 runtime
                                     .adjust_score(&propagation_source, PUNISH_UNACCEPTED_BLOCK)
@@ -372,20 +370,35 @@ impl DhtBehaviourEvent {
                         request, channel, ..
                     } => {
                         let response = match request {
-                            LongestChainRequest::Blocks => {
+                            Request::LongestChainBlocks => {
                                 info!("Peer {:?} requested bootstrap blocks", peer);
                                 let longest_chain =
                                     runtime.state.read().await.blockchain.longest_chain.clone();
                                 let blocks = runtime.state.read().await.blockchain.blocks.clone();
-                                LongestChainResponse::Blocks(
+                                Response::LongestChainBlocks(
                                     longest_chain.iter().map(|h| blocks[h].clone()).collect(),
                                 )
                             }
-                            LongestChainRequest::Hashes => {
+
+                            Request::LongestChainHashes => {
                                 info!("Peer {:?} requested full chain of hashes", peer);
                                 let hashes =
                                     runtime.state.read().await.blockchain.longest_chain.clone();
-                                LongestChainResponse::Hashes(hashes)
+                                Response::LongestChainHashes(hashes)
+                            }
+
+                            Request::BlocksByHashes(hashes) => {
+                                info!("Peer {:?} requested blocks by list of hashes", peer);
+
+                                let blocks = runtime.state.read().await.blockchain.blocks.clone();
+
+                                Response::BlocksByHashes(
+                                    blocks
+                                        .iter()
+                                        .filter(|(_, block)| hashes.contains(&block.hash))
+                                        .map(|(_, block)| block.clone())
+                                        .collect(),
+                                )
                             }
                         };
                         if let Err(e) = runtime
@@ -399,65 +412,34 @@ impl DhtBehaviourEvent {
                     }
                     request_response::Message::Response { response, .. } => {
                         match response {
-                            LongestChainResponse::Blocks(blocks) => {
-                                info!("Received bootstrap blocks from {:?}", peer);
-                                match runtime.process_blocks(blocks.clone()).await {
-                                    Ok(()) => {
-                                        info!(
-                                            "Accepted {:?} valid bootstrap blocks from {:?}",
-                                            peer,
-                                            blocks.len()
-                                        );
-                                    }
-                                    Err(e) => {
-                                        error!(
-                                            "Rejected invalid bootstrap blocks from {:?}: {}",
-                                            peer, e
-                                        );
-                                    }
+                            Response::BlocksByHashes(blocks) => {
+                                info!("Received longest chain of blocks from {:?}", peer);
+                                for b in blocks {
+                                    runtime.accept_block(b.clone(), peer).await?;
                                 }
                             }
-                            LongestChainResponse::Hashes(hashes) => {
-                                // verify against blockchain
-                                // assess and do whatever
-                                // if trusted maybe try to understand if our blockchain isn't main one and replace
-                                // if not trusted and disseminating a malicious blockchain lower reputation score
-                                info!(
-                                    "Received chain of hashes from {:?} (length = {:?})",
-                                    peer,
-                                    hashes.len()
-                                );
-                                let longest_chain =
-                                    runtime.state.read().await.blockchain.longest_chain.clone();
-                                if hashes == longest_chain {
-                                    info!(
-                                        "Longest chain matches longest chain from peer {:?} completely",
-                                        peer
-                                    );
-                                } else {
-                                    let mut n = 1; // number of equal blocks from start
-                                    while n <= hashes.len() && n <= longest_chain.len() {
-                                        if hashes[n - 1] != longest_chain[n - 1] {
-                                            break;
-                                        }
-                                        n += 1;
-                                    }
-                                    info!(
-                                        "Longest chain matches {:?}/{:?} longest chain from peer {:?}",
-                                        n,
-                                        longest_chain.len(),
-                                        peer
-                                    );
-                                    if hashes.len() != longest_chain.len() {
-                                        warn!(
-                                            "Note that longest chain is of length {:?} and longest chain from peer is of length {:?}",
-                                            longest_chain.len(),
-                                            hashes.len()
-                                        );
-                                    }
-                                }
 
-                                // depending on case act accordingly
+                            Response::LongestChainBlocks(blocks) => {
+                                info!("Received longest chain of blocks from {:?}", peer);
+                                for b in blocks {
+                                    runtime.accept_block(b.clone(), peer).await?;
+                                }
+                            }
+
+                            Response::LongestChainHashes(hashes) => {
+                                info!("Received longest chain of hashes from peer {:?}", peer);
+
+                                let blocks = runtime.state.read().await.blockchain.blocks.clone();
+
+                                // request missing blocks to peer
+
+                                Request::BlocksByHashes(
+                                    blocks
+                                        .iter()
+                                        .filter(|(_, block)| hashes.contains(&block.hash))
+                                        .map(|(_, block)| block.clone().hash)
+                                        .collect(),
+                                );
                             }
                         }
                     }

@@ -1,6 +1,9 @@
 use crate::{
-    behaviour::DhtBehaviour, blockchain::block::Block, reputation::SCORE_BLACKLIST_THRESHOLD,
-    state::State, topic::BLOCKS,
+    behaviour::{DhtBehaviour, Request},
+    blockchain::block::Block,
+    reputation::SCORE_BLACKLIST_THRESHOLD,
+    state::State,
+    topic::BLOCKS,
 };
 use libp2p::{PeerId, Swarm};
 use libp2p_gossipsub::IdentTopic;
@@ -22,36 +25,21 @@ impl Runtime {
         }
     }
 
-    pub async fn process_blocks(
-        &mut self,
-        _blocks: Vec<Block>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        if _blocks.is_empty() {
-            return Ok(());
-        }
-
-        {
-            let mut state = self.state.write().await;
-
-            for block in _blocks {
-                state.blockchain.accept_block(block)?;
-            }
-
-            state.blockchain.fix()?;
-        }
-
-        Ok(())
-    }
-
     /// Function validates and appends to chain a block received over gossip protocol.
     /// If the block is valid it gossips the block.
-    pub async fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn accept_block(
+        &mut self,
+        block: Block,
+        peer: PeerId,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let accept_block = self
             .state
             .write()
             .await
             .blockchain
             .accept_block(block.clone());
+
+        // maybe handle pruned blocks premptively before starting whole chain of communication
 
         match accept_block {
             Err(_) => {
@@ -61,7 +49,17 @@ impl Runtime {
                     .received_blocks
                     .insert(block.previous_hash.clone(), block.clone());
 
-                tracing::warn!("Storing block temporarily: {:?}", block);
+                tracing::warn!(
+                    "Storing block temporarily and requesting longest chain of hashes to sender: {:?}",
+                    block
+                );
+
+                // request longest chain of hashes / headers
+
+                self.swarm
+                    .behaviour_mut()
+                    .request_response
+                    .send_request(&peer, Request::LongestChainHashes);
             }
 
             Ok(_) => {

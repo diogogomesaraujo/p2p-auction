@@ -16,10 +16,10 @@ GENERAL idea
                                 -> for loop with accept block on all received
                                 -> fix()
     garbage_collect()
-     -> on every epoch
-     -> take the nth last epoch and remove all associated blocks and add their hashes to garbage
+        -> on every epoch
+        -> take the nth last epoch and remove all associated blocks and add their hashes to garbage
 
-     accept_block (blockchain)
+    accept_block (blockchain)
         -> ignore if any block in garbage is parent
 
 

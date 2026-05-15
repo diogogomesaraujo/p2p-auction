@@ -10,7 +10,7 @@ use crate::state::blockchain::{
 use crate::{blockchain::Blockchain, reputation::INITIAL_PEER_SCORE, time::Timestamp};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
 use std::str::FromStr;
