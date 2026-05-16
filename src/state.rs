@@ -23,9 +23,9 @@ use tracing::info;
 #[derive(Debug, Clone)]
 pub struct State {
     pub rpc_address: SocketAddr,
-    pub peers: HashMap<PeerId, PeerInfo>,
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
+    pub peers: HashMap<PeerId, PeerInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,8 +33,8 @@ pub struct PeerInfo {
     pub first_seen: Option<Timestamp>,
     pub last_seen: Option<Timestamp>,
     pub session_count: u32,
-    pub blacklisted: bool,
     pub application_score: f64,
+    pub blacklisted: bool,
 }
 
 impl Default for PeerInfo {
@@ -53,7 +53,7 @@ impl State {
     pub fn init(rpc_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
             peers: HashMap::new(),
-            blockchain: Blockchain::new(u32::MAX)?, // ??? replace by an initial probe function
+            blockchain: Blockchain::new(u32::MAX)?,
             received_blocks: HashMap::new(),
             rpc_address: SocketAddr::from_str(rpc_address)?,
         })

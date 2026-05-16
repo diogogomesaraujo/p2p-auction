@@ -1,29 +1,10 @@
 use crate::{
-    behaviour::{DhtBehaviour, Request, Response},
     runtime::Runtime,
-    state::State,
-    topic,
     vm::{LISTEN_ON, VirtualMachine},
 };
 use async_trait::async_trait;
-use libp2p::{
-    Multiaddr, PeerId, StreamProtocol, SwarmBuilder, identify,
-    identity::Keypair,
-    kad::{self, Caching, Config, K_VALUE, KBucketKey, Mode, store::MemoryStore},
-    noise, ping,
-    request_response::{self, ProtocolSupport},
-    tcp, yamux,
-};
-use libp2p_gossipsub::{
-    self as gossipsub, IdentTopic, MessageAuthenticity, MessageId, ValidationMode,
-};
-use std::{
-    collections::hash_map::DefaultHasher,
-    error::Error,
-    hash::{Hash, Hasher},
-    str::SplitWhitespace,
-    time::Duration,
-};
+use libp2p::{Multiaddr, PeerId, StreamProtocol, identity::Keypair, kad::KBucketKey};
+use std::{error::Error, str::SplitWhitespace};
 use tracing::info;
 
 pub struct Node {
@@ -63,116 +44,22 @@ impl VirtualMachine for Node {
         key: Keypair,
         rpc_address: &str,
     ) -> Result<Runtime, Box<dyn Error + Send + Sync>> {
-        let state = State::init(rpc_address)?;
-
-        let mut swarm = SwarmBuilder::with_existing_identity(key)
-            .with_tokio()
-            .with_tcp(
-                tcp::Config::default(),
-                noise::Config::new,
-                yamux::Config::default,
-            )?
-            .with_dns()?
-            .with_behaviour(|key| {
-                let local_id = key.public().to_peer_id();
-
-                /* Kademlia */
-
-                let mut kad_cfg = Config::new(ipfs_proto_name.clone());
-                kad_cfg.set_query_timeout(Duration::from_secs(60));
-                kad_cfg.set_periodic_bootstrap_interval(Some(Duration::from_secs(300)));
-                kad_cfg.set_record_ttl(Some(Duration::from_secs(36 * 60 * 60)));
-                kad_cfg.set_replication_interval(Some(Duration::from_secs(60 * 60)));
-                kad_cfg.set_publication_interval(Some(Duration::from_secs(24 * 60 * 60)));
-                kad_cfg.set_replication_factor(K_VALUE);
-                kad_cfg.disjoint_query_paths(true);
-                kad_cfg.set_provider_record_ttl(Some(Duration::from_secs(48 * 60 * 60)));
-                kad_cfg.set_provider_publication_interval(Some(Duration::from_secs(12 * 60 * 60)));
-                kad_cfg.set_caching(Caching::Enabled { max_peers: 1 });
-
-                let store = MemoryStore::new(local_id);
-                let kad = kad::Behaviour::with_config(local_id, store, kad_cfg);
-
-                /* Ping */
-
-                let ping = ping::Behaviour::new(
-                    ping::Config::new()
-                        .with_interval(Duration::from_secs(10))
-                        .with_timeout(Duration::from_secs(3)),
-                );
-
-                /* Identify */
-
-                let identify = identify::Behaviour::new(identify::Config::new(
-                    ipfs_proto_name.to_string(),
-                    key.public(),
-                ));
-
-                /* Gossip */
-
-                let message_id_fn = |message: &gossipsub::Message| {
-                    let mut hasher = DefaultHasher::new();
-                    message.data.hash(&mut hasher);
-                    MessageId::from(hasher.finish().to_string())
-                };
-
-                let gossip_config = gossipsub::ConfigBuilder::default()
-                    .heartbeat_interval(Duration::from_secs(10))
-                    .validation_mode(ValidationMode::Strict)
-                    .message_id_fn(message_id_fn)
-                    .build()?;
-
-                let mut gossip = gossipsub::Behaviour::new(
-                    MessageAuthenticity::Signed(key.clone()),
-                    gossip_config,
-                )?;
-
-                // let topic_score = TopicScoreParams::default();
-                // let mut peer_score = PeerScoreParams::default();
-
-                // peer_score.topics.insert(
-                //     gossipsub::IdentTopic::new(topic::BLOCKS).hash(),
-                //     topic_score,
-                // );
-
-                // let thresholds = PeerScoreThresholds::default();
-
-                // gossip.with_peer_score(peer_score, thresholds)?;
-                gossip.subscribe(&IdentTopic::new(topic::BLOCKS))?;
-
-                /* Request Response */
-
-                let request_response = request_response::cbor::Behaviour::<Request, Response>::new(
-                    [(
-                        StreamProtocol::new("/blockchain/cbor/1"),
-                        ProtocolSupport::Full,
-                    )],
-                    request_response::Config::default(),
-                );
-
-                Ok(DhtBehaviour {
-                    kad,
-                    ping,
-                    identify,
-                    gossip,
-                    request_response,
-                })
-            })?
-            .build();
+        let mut runtime = Runtime::init(ipfs_proto_name, key, rpc_address).await?;
 
         for (bootstrap_addr, bootstrap_id) in &self.bootstrap_nodes {
-            swarm
+            runtime
+                .swarm
                 .behaviour_mut()
                 .kad
                 .add_address(bootstrap_id, bootstrap_addr.clone());
-            swarm.dial(bootstrap_id.clone())?;
+
+            runtime.swarm.dial(*bootstrap_id)?;
         }
 
-        swarm.behaviour_mut().kad.set_mode(Some(Mode::Server));
-        swarm.listen_on(LISTEN_ON.parse()?)?;
+        runtime.swarm.listen_on(LISTEN_ON.parse()?)?;
 
-        let mut runtime = Runtime::new(swarm, state);
-        runtime.load_from_local().await?;
+        // is it needed ? if so pass bootstrap peers in state
+        // then on connection established or ident or whatever with boot do it
 
         // if let Some(boot) = self.bootstrap_nodes.first() {
         //     runtime
