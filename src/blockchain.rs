@@ -22,7 +22,9 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     error::Error,
+    sync::{Arc, atomic::AtomicBool},
 };
+use tokio::sync::Notify;
 
 const EXECUTE_AFTER_N_BLOCKS: usize = 2;
 
@@ -681,11 +683,10 @@ impl Blockchain {
     }
 
     /// Function that accepts a block proposed by another node.
-
-    pub async fn accept_block(
+    pub fn accept_block(
         &mut self,
         block: Block,
-        transaction_notifiers: &HashMap<String, Arc<Notify>,
+        notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         if self.blocks.contains_key(&block.hash) {
             return Err("Already known block.".into());
@@ -715,15 +716,38 @@ impl Blockchain {
 
         self.push_block(block);
 
-        self.fix()?;
+        self.fix(notifiers)?;
 
         Ok(())
+    }
+
+    fn execute_transactions(&mut self, notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>) {
+        let mut count = 0;
+        for i in self.commited_pointer
+            ..(self
+                .longest_chain
+                .len()
+                .saturating_sub(EXECUTE_AFTER_N_BLOCKS))
+        {
+            let h = &self.longest_chain[i];
+            if let Some(b) = self.blocks.get(h) {
+                for t in b.transactions.iter() {
+                    if let Some(notify) = notifiers.get(&t.id) {
+                        notify.0.notify_one();
+                        notify.1.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+            count += 1;
+        }
+        self.commited_pointer += count;
     }
 
     /// Function that appends a block to the blockchain.
     pub fn propose_block(
         &mut self,
         public_key: &str,
+        notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
     ) -> Result<Block, Box<dyn Error + Send + Sync>> {
         let transactions = self.transaction_pool.flush();
 
@@ -748,7 +772,7 @@ impl Blockchain {
 
         self.push_block(block_to_append.clone());
 
-        self.fix()?;
+        self.fix(notifiers)?;
 
         Ok(block_to_append)
     }
@@ -809,6 +833,7 @@ impl Blockchain {
     pub fn prune(
         &mut self,
         branch_map: &HashMap<String, Vec<String>>,
+        notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         if self.longest_chain.len() < EXECUTE_AFTER_N_BLOCKS {
             return Ok(());
@@ -843,13 +868,24 @@ impl Blockchain {
         for h in bin {
             self.pruned.insert(h.clone());
 
+            if let Some(b) = self.blocks.get(&h) {
+                b.transactions.iter().for_each(|t| {
+                    if let Some(notify) = notifiers.get(&t.id) {
+                        notify.0.notify_one();
+                    }
+                });
+            }
+
             self.blocks.remove(&h);
         }
 
         Ok(())
     }
 
-    pub fn fix(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub fn fix(
+        &mut self,
+        notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // construct branch map
 
         let mut branch_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -867,13 +903,14 @@ impl Blockchain {
 
         // prune
 
-        self.prune(&branch_map)?;
+        self.prune(&branch_map, notifiers)?;
+
+        self.execute_transactions(notifiers);
 
         Ok(())
     }
 }
 
-/// Trait that defines the functions that can mutate the blockchain.
 pub trait WorldState {
     fn get_block_from_hash(&self, hash: &str) -> Option<&Block>;
 }

@@ -119,7 +119,8 @@ pub trait VirtualMachine {
             tokio::spawn(async move {
                 loop {
                     let mut chain = state.read().await.blockchain.clone();
-                    let block = match chain.propose_block(&public_key) {
+                    let notifiers = state.read().await.notifiers.clone();
+                    let block = match chain.propose_block(&public_key, &notifiers) {
                         Ok(b) => b,
                         _ => continue,
                     };

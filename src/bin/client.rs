@@ -1,6 +1,6 @@
 use blocktion::{
     blockchain::transaction::{Data, Transaction},
-    state::blockchain::node_rpc_service_client::NodeRpcServiceClient,
+    state::blockchain::{TransactionResponse, node_rpc_service_client::NodeRpcServiceClient},
 };
 use ed25519_dalek_blake2b::Keypair;
 use hex::ToHex;
@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let keys = Keypair::generate(&mut OsRng);
 
-    client
+    let res = client
         .transaction(Request::new(
             Transaction::sign(
                 Data::CreateUserAccount {
@@ -28,7 +28,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         ))
         .await?;
 
-    println!("success");
+    let status = match res.into_inner() {
+        TransactionResponse { status } if status == 0 => "success",
+        _ => "failed",
+    };
+
+    println!("{}", status);
 
     Ok(())
 }

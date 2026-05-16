@@ -13,6 +13,8 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status};
@@ -23,6 +25,7 @@ pub struct State {
     pub rpc_address: SocketAddr,
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
+    pub notifiers: HashMap<String, Arc<(Notify, AtomicBool)>>,
 }
 
 impl State {
@@ -31,6 +34,7 @@ impl State {
             rpc_address: SocketAddr::from_str(rpc_address)?,
             blockchain: Blockchain::new(u32::MAX)?,
             received_blocks: HashMap::new(),
+            notifiers: HashMap::new(),
         })
     }
 }
@@ -140,6 +144,14 @@ impl NodeRpcService for Arc<RwLock<State>> {
             transaction
         );
 
+        let tid = transaction.id.clone();
+
+        let notify = Arc::new((Notify::new(), AtomicBool::new(false)));
+        self.write()
+            .await
+            .notifiers
+            .insert(tid.clone(), notify.clone());
+
         match self
             .write()
             .await
@@ -151,7 +163,16 @@ impl NodeRpcService for Arc<RwLock<State>> {
             _ => return Ok(Response::new(TransactionResponse { status: 1 })),
         };
 
-        Ok(Response::new(TransactionResponse { status: 0 }))
+        notify.0.notified().await;
+
+        self.write().await.notifiers.remove(&tid);
+
+        let status = match notify.1.load(std::sync::atomic::Ordering::SeqCst) {
+            true => 0,
+            false => 1,
+        };
+
+        Ok(Response::new(TransactionResponse { status }))
     }
 
     async fn block_info(
