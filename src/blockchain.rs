@@ -19,7 +19,9 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     error::Error,
+    sync::{Arc, atomic::AtomicBool},
 };
+use tokio::sync::{Notify, RwLock};
 
 const EXECUTE_AFTER_N_BLOCKS: usize = 2;
 
@@ -678,7 +680,11 @@ impl Blockchain {
     }
 
     /// Function that accepts a block proposed by another node.
-    pub fn accept_block(&mut self, block: Block) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn accept_block(
+        &mut self,
+        block: Block,
+        transaction_notifiers: &mut HashMap<String, (Arc<Notify>, AtomicBool)>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         if self.blocks.contains_key(&block.hash) {
             return Err("Already known block.".into());
         }
@@ -708,6 +714,18 @@ impl Blockchain {
         self.push_block(block);
 
         self.fix()?;
+
+        for i in self.commited_pointer..(self.longest_chain.len() - EXECUTE_AFTER_N_BLOCKS) {
+            let h = &self.longest_chain[i];
+            if let Some(b) = self.blocks.get(h) {
+                for t in b.transactions.iter() {
+                    if let Some((notify, status)) = transaction_notifiers.remove(&t.id) {
+                        notify.notify_waiters();
+                        status.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
