@@ -1,3 +1,4 @@
+use crate::error::AcceptBlockError;
 use crate::{behaviour::Response, topic};
 use crate::{
     behaviour::{DhtBehaviour, Request},
@@ -172,29 +173,37 @@ impl Runtime {
                 }
             }
 
-            // Spaguetti Logic in error handling.
-            // Need to implement a propper error module
             Err(e) => {
-                let msg = e.to_string();
+                if let Some(accept_error) = e.downcast_ref::<AcceptBlockError>() {
+                    match accept_error {
+                        AcceptBlockError::Duplicate => {
+                            return Ok(());
+                        }
 
-                if msg == "Already known block." {
-                    return Ok(());
-                }
+                        AcceptBlockError::Orphan => {
+                            self.state
+                                .write()
+                                .await
+                                .received_blocks
+                                .insert(block.hash.clone(), block.clone());
 
-                if msg == "The block proposed does not point to a block in the chain." {
-                    self.state
-                        .write()
-                        .await
-                        .received_blocks
-                        .insert(block.hash.clone(), block.clone());
+                            if request_missing {
+                                self.swarm
+                                    .behaviour_mut()
+                                    .request_response
+                                    .send_request(&peer, Request::LongestChainHashes);
+                            }
 
-                    if request_missing {
-                        self.swarm
-                            .behaviour_mut()
-                            .request_response
-                            .send_request(&peer, Request::LongestChainHashes);
+                            return Ok(());
+                        }
+
+                        _ => {
+                            return Err(e);
+                        }
                     }
                 }
+
+                return Err(e);
             }
         }
 
