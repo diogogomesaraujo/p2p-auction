@@ -158,11 +158,7 @@ impl Runtime {
             .write()
             .await
             .blockchain
-            .accept_block(
-                block.clone(),
-                &mut self.state.write().await.transaction_notify,
-            )
-            .await;
+            .accept_block(block.clone());
 
         match result {
             Ok(_) => {

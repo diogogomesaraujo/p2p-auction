@@ -13,7 +13,6 @@ use std::error::Error;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tonic::transport::Server;
@@ -24,7 +23,7 @@ use tracing::info;
 pub struct State {
     pub rpc_address: SocketAddr,
     pub blockchain: Blockchain,
-    pub transaction_notify: HashMap<String, (Arc<Notify>, AtomicBool)>,
+    pub transaction_notify: HashMap<String, Arc<Notify>>,
     pub received_blocks: HashMap<String, Block>,
 }
 
@@ -145,10 +144,10 @@ impl NodeRpcService for Arc<RwLock<State>> {
         );
 
         let notify = Arc::new(Notify::new());
-        self.write().await.transaction_notify.insert(
-            transaction.id.to_string(),
-            (notify.clone(), AtomicBool::new(false)),
-        );
+        self.write()
+            .await
+            .transaction_notify
+            .insert(transaction.id.to_string(), notify.clone());
 
         match self
             .write()
