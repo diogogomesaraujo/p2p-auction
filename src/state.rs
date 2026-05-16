@@ -1,3 +1,4 @@
+use crate::blockchain::Blockchain;
 use crate::blockchain::WorldState;
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
@@ -7,9 +8,6 @@ use crate::state::blockchain::{
     Bid, BlockInfoRequest, BlockInfoResponse, CreateAccount, CreateAuction, LongestChainRequest,
     LongestChainResponse, TransactionRequest, TransactionResponse,
 };
-use crate::{blockchain::Blockchain, reputation::INITIAL_PEER_SCORE, time::Timestamp};
-use libp2p::PeerId;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::net::SocketAddr;
@@ -25,37 +23,14 @@ pub struct State {
     pub rpc_address: SocketAddr,
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
-    pub peers: HashMap<PeerId, PeerInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PeerInfo {
-    pub first_seen: Option<Timestamp>,
-    pub last_seen: Option<Timestamp>,
-    pub session_count: u32,
-    pub application_score: f64,
-    pub blacklisted: bool,
-}
-
-impl Default for PeerInfo {
-    fn default() -> Self {
-        Self {
-            first_seen: None,
-            last_seen: None,
-            session_count: 0,
-            blacklisted: false,
-            application_score: INITIAL_PEER_SCORE,
-        }
-    }
 }
 
 impl State {
     pub fn init(rpc_address: &str) -> Result<Self, Box<dyn Error + Send + Sync>> {
         Ok(Self {
-            peers: HashMap::new(),
+            rpc_address: SocketAddr::from_str(rpc_address)?,
             blockchain: Blockchain::new(u32::MAX)?,
             received_blocks: HashMap::new(),
-            rpc_address: SocketAddr::from_str(rpc_address)?,
         })
     }
 }

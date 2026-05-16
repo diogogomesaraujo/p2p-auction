@@ -1,4 +1,3 @@
-use crate::reputation::SCORE_BLACKLIST_THRESHOLD;
 use crate::{behaviour::Response, topic};
 use crate::{
     behaviour::{DhtBehaviour, Request},
@@ -26,7 +25,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::RwLock;
-use tracing::warn;
 
 pub struct Runtime {
     pub swarm: Swarm<DhtBehaviour>,
@@ -200,50 +198,6 @@ impl Runtime {
             }
         }
 
-        Ok(())
-    }
-
-    /// Adjusts a peer's application score by a given delta and
-    /// sets syncs application score in gossip sub
-    pub async fn adjust_score(
-        &mut self,
-        peer_id: &PeerId,
-        delta: f64,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let mut state = self.state.write().await;
-        let entry = state.peers.entry(peer_id.clone()).or_default();
-
-        entry.application_score += delta;
-        let score = entry.application_score;
-        self.swarm
-            .behaviour_mut()
-            .gossip
-            .set_application_score(peer_id, score);
-
-        // ??????
-        if score <= SCORE_BLACKLIST_THRESHOLD {
-            warn!("Blacklisting peer {:?} (score={})", peer_id, score);
-            self.swarm.behaviour_mut().gossip.blacklist_peer(peer_id);
-            entry.blacklisted = true;
-        }
-
-        Ok(())
-    }
-
-    /// Replays persistent blacklist into gossipsub and bootstraps Kademlia.
-    pub async fn load_from_local(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let blacklisted: Vec<PeerId> = self
-            .state
-            .read()
-            .await
-            .peers
-            .iter()
-            .filter_map(|(id, info)| if info.blacklisted { Some(*id) } else { None })
-            .collect();
-
-        for peer_id in blacklisted {
-            self.swarm.behaviour_mut().gossip.blacklist_peer(&peer_id);
-        }
         Ok(())
     }
 }
