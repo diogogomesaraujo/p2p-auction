@@ -694,7 +694,7 @@ impl Blockchain {
         if !block.verify()? {
             return Err("The block proposed has an invalid hash.".into());
         }
-        // leave the error message be. right now accept_block logic depends on it
+        // leave the error message be. right now pruning logic depends on it
         if !self.has_previous_block(&block.previous_hash) {
             return Err("The block proposed does not point to a block in the chain.".into());
         }
@@ -765,10 +765,7 @@ impl Blockchain {
             .any(|(_, b)| b.transactions.contains(transaction))
     }
 
-    fn find_longest_branch(
-        branch_map: &HashMap<String, Vec<String>>,
-        prev_h: &str,
-    ) -> (Vec<String>, usize) {
+    fn find_longest_branch(branch_map: &HashMap<String, Vec<String>>, prev_h: &str) -> Vec<String> {
         let mut result = vec![prev_h.to_string()];
 
         fn min_hash(a: &str, b: &str) -> Ordering {
@@ -783,27 +780,20 @@ impl Blockchain {
         }
 
         if let Some(leaves) = branch_map.get(prev_h) {
-            result = [
-                result,
-                leaves
-                    .iter()
-                    .map(|leaf| Self::find_longest_branch(branch_map, leaf))
-                    .max_by(|(a, ca), (b, cb)| {
-                        if ca < &EXECUTE_AFTER_N_BLOCKS && cb < &EXECUTE_AFTER_N_BLOCKS {
-                            a.len().cmp(&b.len())
-                        } else {
-                            min_hash(&a[0], &b[0])
-                        }
-                    })
-                    .unwrap_or_default()
-                    .0,
-            ]
-            .concat();
+            let winner = leaves
+                .iter()
+                .map(|leaf| Self::find_longest_branch(branch_map, leaf))
+                .max_by(|a, b| {
+                    a.len()
+                        .cmp(&b.len())
+                        .then_with(|| min_hash(b.last().unwrap(), a.last().unwrap()))
+                })
+                .unwrap_or_default();
+
+            result.extend(winner);
         }
 
-        let len = result.len() + 1;
-
-        (result, len)
+        result
     }
 
     /// Function that prunes every block that belongs to a branch beaten by longest chain
@@ -864,7 +854,7 @@ impl Blockchain {
 
         // find longest chain
 
-        self.longest_chain = Self::find_longest_branch(&branch_map, "0").0[1..].to_vec();
+        self.longest_chain = Self::find_longest_branch(&branch_map, "0")[1..].to_vec();
 
         // prune
 
