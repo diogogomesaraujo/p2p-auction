@@ -88,7 +88,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 match Transaction::new(
                     Data::CreateUserAccount { public_key },
                     t.from,
-                    0,
+                    t.nonce,
                     &t.signature,
                 ) {
                     Ok(t) => t,
@@ -98,19 +98,17 @@ impl NodeRpcService for Arc<RwLock<State>> {
 
             Record::CreateAuctionRequest(CreateAuction {
                 auction_id,
-                from,
                 start_amount,
                 stop_time,
             }) => {
                 match Transaction::new(
                     Data::CreateAuction {
                         auction_id,
-                        from,
                         start_amount,
                         stop_time,
                     },
                     t.from,
-                    0,
+                    t.nonce,
                     &t.signature,
                 ) {
                     Ok(t) => t,
@@ -118,19 +116,11 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 }
             }
 
-            Record::BidRequest(Bid {
-                auction_id,
-                from,
-                amount,
-            }) => {
+            Record::BidRequest(Bid { auction_id, amount }) => {
                 match Transaction::new(
-                    Data::Bid {
-                        auction_id,
-                        from,
-                        amount,
-                    },
+                    Data::Bid { auction_id, amount },
                     t.from,
-                    0,
+                    t.nonce,
                     &t.signature,
                 ) {
                     Ok(t) => t,
@@ -152,13 +142,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
             .notifiers
             .insert(tid.clone(), notify.clone());
 
-        match self
-            .write()
-            .await
-            .blockchain
-            .transaction_pool
-            .add_transaction(transaction)
-        {
+        match self.write().await.blockchain.add_transaction(transaction) {
             Ok(_) => {}
             _ => return Ok(Response::new(TransactionResponse { status: 1 })),
         };

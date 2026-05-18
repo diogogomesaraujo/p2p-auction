@@ -12,7 +12,7 @@
 use crate::{
     blockchain::{
         block::Block,
-        transaction::{Transaction, TransactionPool},
+        transaction::{Data, Transaction, TransactionPool},
     },
     error::AcceptBlockError,
 };
@@ -255,12 +255,10 @@ pub mod transaction {
         },
         Bid {
             auction_id: String,
-            from: String,
             amount: u64,
         },
         CreateAuction {
             auction_id: String,
-            from: String,
             start_amount: u64,
             stop_time: Timestamp,
         },
@@ -270,24 +268,19 @@ pub mod transaction {
         /// Function that converts the a transaction record into the defined protobuf format.
         fn into(self) -> transaction_request::Record {
             match self {
-                Data::Bid {
-                    auction_id,
-                    from,
-                    amount,
-                } => transaction_request::Record::BidRequest(state::blockchain::Bid {
-                    auction_id,
-                    from,
-                    amount,
-                }),
+                Data::Bid { auction_id, amount } => {
+                    transaction_request::Record::BidRequest(state::blockchain::Bid {
+                        auction_id,
+                        amount,
+                    })
+                }
                 Data::CreateAuction {
                     auction_id,
-                    from,
                     start_amount,
                     stop_time,
                 } => transaction_request::Record::CreateAuctionRequest(
                     state::blockchain::CreateAuction {
                         auction_id,
-                        from,
                         start_amount,
                         stop_time,
                     },
@@ -306,24 +299,19 @@ pub mod transaction {
         /// Function that converts the a transaction record into the defined protobuf format.
         fn into(self) -> state::blockchain::transaction::Record {
             match self {
-                Data::Bid {
-                    auction_id,
-                    from,
-                    amount,
-                } => state::blockchain::transaction::Record::BidRequest(state::blockchain::Bid {
-                    auction_id,
-                    from,
-                    amount,
-                }),
+                Data::Bid { auction_id, amount } => {
+                    state::blockchain::transaction::Record::BidRequest(state::blockchain::Bid {
+                        auction_id,
+                        amount,
+                    })
+                }
                 Data::CreateAuction {
                     auction_id,
-                    from,
                     start_amount,
                     stop_time,
                 } => state::blockchain::transaction::Record::CreateAuctionRequest(
                     state::blockchain::CreateAuction {
                         auction_id,
-                        from,
                         start_amount,
                         stop_time,
                     },
@@ -344,6 +332,7 @@ pub mod transaction {
                 signature: self.signature,
                 from: self.from,
                 record: Some(self.record.into()),
+                nonce: self.nonce,
             }
         }
     }
@@ -503,6 +492,13 @@ pub mod transaction {
             Ok(())
         }
 
+        /// Function that detects duplicate nonces for same sender.
+        pub fn replay(&self, transaction: &Transaction) -> bool {
+            self.0
+                .values()
+                .any(|t| t.from == transaction.from && t.nonce == transaction.nonce)
+        }
+
         /// Function that flushes the current mempool and returns a queue sorted by timestamp.
         pub fn flush(&mut self) -> TransactionQueue {
             let memqueue = self.clone().to_sorted_queue();
@@ -651,6 +647,13 @@ pub mod block {
     }
 }
 
+/// Struct that represents state for a given account
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Account {
+    pub public_key: String,
+    pub nonce: u32,
+}
+
 /// Struct that represents the blockchain that will be used as the ledger for the auction system.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Blockchain {
@@ -659,7 +662,8 @@ pub struct Blockchain {
     pub commited_pointer: usize,
     pub transaction_pool: TransactionPool,
     pub difficulty: u32,
-    pub pruned: HashSet<String>, // Hashes of blocks that were pruned
+    pub pruned: HashSet<String>,
+    pub accounts: HashMap<String, Account>,
 }
 
 impl Blockchain {
@@ -669,6 +673,7 @@ impl Blockchain {
             transaction_pool: TransactionPool::new(),
             blocks: HashMap::new(),
             pruned: HashSet::new(),
+            accounts: HashMap::new(),
             longest_chain: vec![],
             commited_pointer: 0,
             difficulty,
@@ -731,6 +736,52 @@ impl Blockchain {
         Ok(())
     }
 
+    fn execute_single_transaction(
+        &mut self,
+        transaction: &Transaction,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        transaction.verify()?;
+
+        match &transaction.record {
+            Data::CreateUserAccount { public_key } => {
+                if transaction.from != *public_key {
+                    return Err("Create account sender mismatch.".into());
+                }
+
+                if transaction.nonce != 0 {
+                    return Err("Create account nonce must be 0.".into());
+                }
+
+                if self.accounts.contains_key(public_key) {
+                    return Err("Account already exists.".into());
+                }
+
+                self.accounts.insert(
+                    public_key.clone(),
+                    Account {
+                        public_key: public_key.clone(),
+                        nonce: 1,
+                    },
+                );
+            }
+
+            Data::CreateAuction { .. } | Data::Bid { .. } => {
+                let account = self
+                    .accounts
+                    .get_mut(&transaction.from)
+                    .ok_or("Unknown account.")?;
+
+                if transaction.nonce != account.nonce {
+                    return Err("Invalid nonce.".into());
+                }
+
+                account.nonce += 1;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Function that notifies RPC clients that the transaction was validated.
     fn execute_transactions(&mut self, notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>) {
         let mut count = 0;
@@ -742,10 +793,20 @@ impl Blockchain {
         {
             let h = &self.longest_chain[i];
             if let Some(b) = self.blocks.get(h) {
-                for t in b.transactions.iter() {
+                for t in b.transactions.clone() {
+                    let executed = match self.execute_single_transaction(&t) {
+                        Ok(()) => true,
+                        Err(e) => {
+                            tracing::warn!("Rejected transaction {}: {}", t.id, e);
+                            false
+                        }
+                    };
+
                     if let Some(notify) = notifiers.get(&t.id) {
                         notify.0.notify_one();
-                        notify.1.store(true, std::sync::atomic::Ordering::SeqCst);
+                        notify
+                            .1
+                            .store(executed, std::sync::atomic::Ordering::SeqCst);
                     }
                 }
             }
@@ -921,6 +982,54 @@ impl Blockchain {
         self.prune(&branch_map, notifiers)?;
 
         self.execute_transactions(notifiers);
+
+        Ok(())
+    }
+
+    /// Function that adds transaction to transaction pool.
+    pub fn add_transaction(
+        &mut self,
+        transaction: Transaction,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        transaction.verify()?;
+
+        if self.has_transaction(&transaction) {
+            return Err("Transaction already recorded.".into());
+        }
+
+        match &transaction.record {
+            Data::CreateUserAccount { public_key } => {
+                if transaction.from != *public_key {
+                    return Err("Create account sender mismatch.".into());
+                }
+
+                if transaction.nonce != 0 {
+                    return Err("Create account nonce must be 0.".into());
+                }
+
+                if self.accounts.contains_key(public_key) {
+                    return Err("Account already exists.".into());
+                }
+            }
+
+            _ => {
+                let expected_nonce = self
+                    .accounts
+                    .get(&transaction.from)
+                    .map(|account| account.nonce)
+                    .ok_or("Unknown account.")?;
+
+                if transaction.nonce < expected_nonce {
+                    return Err("Nonce already used.".into());
+                }
+
+                if self.transaction_pool.replay(&transaction) {
+                    return Err("Duplicate pending nonce.".into());
+                }
+            }
+        }
+
+        self.transaction_pool.add_transaction(transaction)?;
 
         Ok(())
     }

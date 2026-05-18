@@ -9,15 +9,13 @@ message CreateAccount {
 
 message Bid {
   string auction_id = 1;
-  string from = 2;
-  uint64 amount = 3;
+  uint64 amount = 2;
 }
 
 message CreateAuction {
   string auction_id = 1;
-  string from = 2;
-  uint64 start_amount = 3;
-  uint64 stop_time = 4;
+  uint64 start_amount = 2;
+  uint64 stop_time = 3;
 }
 message TransactionRequest {
   oneof record {
@@ -25,8 +23,10 @@ message TransactionRequest {
     Bid bid_request = 2;
     CreateAuction create_auction_request = 3;
   }
+
   string signature = 5;
   string from = 6;
+  uint32 nonce = 7;
 }
 
 message BlockInfoRequest {

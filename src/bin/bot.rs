@@ -24,23 +24,46 @@ struct Args {
 async fn gen_request(
     keys: &Keypair,
     client: &mut NodeRpcServiceClient<Channel>,
+    nonce: &mut u32,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let id = OsRng.next_u32().to_string();
     client
         .transaction(Request::new(
             Transaction::sign(
                 Data::CreateAuction {
-                    auction_id: OsRng.next_u32().to_string(),
-                    from: OsRng.next_u32().to_string(),
+                    auction_id: id.clone(),
                     start_amount: OsRng.next_u64(),
                     stop_time: now_unix_plus(Duration::from_secs(OsRng.next_u64()))?,
                 },
                 &keys.public.encode_hex::<String>(),
-                0,
+                nonce.clone(),
                 &keys,
             )?
             .into(),
         ))
         .await?;
+
+    *nonce += 1;
+
+    client
+        .transaction(Request::new(
+            Transaction::sign(
+                Data::Bid {
+                    auction_id: id.clone(),
+                    amount: 10000,
+                },
+                &keys.public.encode_hex::<String>(),
+                nonce.clone(),
+                &keys,
+            )?
+            .into(),
+        ))
+        .await?;
+
+    *nonce += 1;
+
+    println!("{:?}", nonce);
+
     Ok(())
 }
 
@@ -58,6 +81,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         Poisson::new(RATE, &seed)
     };
 
+    let mut nonce = 0;
+
     client
         .transaction(Request::new(
             Transaction::sign(
@@ -65,12 +90,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     public_key: keys.public.encode_hex(),
                 },
                 &keys.public.encode_hex::<String>(),
-                0,
+                nonce,
                 &keys,
             )?
             .into(),
         ))
         .await?;
+
+    nonce += 1;
 
     println!("created account");
 
@@ -80,7 +107,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         ))
         .await;
 
-        gen_request(&keys, &mut client).await?;
+        gen_request(&keys, &mut client, &mut nonce).await?;
 
         println!("generated {:?}/{:?} requests", i + 1, args.iterations);
     }

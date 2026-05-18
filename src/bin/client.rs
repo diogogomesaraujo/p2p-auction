@@ -14,6 +14,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let keys = Keypair::generate(&mut OsRng);
 
+    let nonce = 0;
+
     let res = client
         .transaction(Request::new(
             Transaction::sign(
@@ -21,7 +23,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     public_key: keys.public.encode_hex(),
                 },
                 &keys.public.encode_hex::<String>(),
-                0,
+                nonce,
                 &keys,
             )?
             .into(),

@@ -1,9 +1,17 @@
-- stake -> blocks commited == computation - if block is malicious cut reputation by half. (constant reputation gain, linear-inverse reputation loss)
-- stake punish is a transaction
-- reward is a function that analyses the longest chain
+01_replay_same_transaction
+02_replay_same_nonce_different_payload
+03_forged_signature
+04_tampered_signed_transaction
+05_duplicate_transaction_across_fork
+06_two_miners_same_parent
+07_orphan_block_received_before_parent
+08_invalid_previous_hash
+09_invalid_merkle_root
+10_invalid_pow_hash
+11_byzantine_node_sends_garbage_blocks
+12_churn_node_disconnects_and_rejoins
+13_eclipse_node_only_receives_attacker_blocks
+14_honest_bot_keeps_chain_progressing
 
-trait bot?
-
-prune with notify backend
-
-error handling with mod error {} done for accept block
+trait bot? use bots as attack vectors
+increment transaction nonce upon commit
