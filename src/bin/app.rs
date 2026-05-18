@@ -20,21 +20,41 @@ mod helper {
 }
 
 mod logkeys {
-    use std::process::exit;
-
+    use crate::{Screen, helper::validate_field};
     use crossterm::event::KeyCode;
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
         style::{Style, Stylize},
+        symbols::border,
         widgets::{Block, Borders, Paragraph},
     };
 
-    use crate::{Screen, helper::validate_field};
+    const PUBLIC_KEY_REQUIRED: &str = "A public key is required.";
+    const PRIVATE_KEY_REQUIRED: &str = "A private key is required.";
 
     #[derive(Clone)]
     pub enum Field {
         PublicKey,
         PrivateKey,
+        GenerateKey,
+    }
+
+    impl Field {
+        pub fn toggle_up(&self) -> Option<Self> {
+            match self {
+                Self::GenerateKey => Some(Self::PrivateKey),
+                Self::PrivateKey => Some(Self::PublicKey),
+                Self::PublicKey => None,
+            }
+        }
+
+        pub fn toggle_down(&self) -> Option<Self> {
+            match self {
+                Self::GenerateKey => None,
+                Self::PrivateKey => Some(Self::GenerateKey),
+                Self::PublicKey => Some(Self::PrivateKey),
+            }
+        }
     }
 
     #[derive(Clone)]
@@ -57,27 +77,30 @@ mod logkeys {
     impl Screen for LogKeys {
         fn handle_input(&mut self, key: crossterm::event::KeyCode) -> Option<Box<dyn Screen>> {
             match key {
-                KeyCode::Esc => {
-                    exit(0);
-                }
-
                 KeyCode::Char(c) => match self.field {
                     Field::PublicKey => {
+                        if &self.public_key_content == PUBLIC_KEY_REQUIRED {
+                            self.public_key_content = String::new();
+                        }
                         self.public_key_content.push(c);
                     }
                     Field::PrivateKey => {
+                        if &self.private_key_content == PRIVATE_KEY_REQUIRED {
+                            self.private_key_content = String::new();
+                        }
                         self.private_key_content.push(c);
                     }
+                    _ => {}
                 },
 
                 KeyCode::Enter => {
                     if validate_field(&self.public_key_content) {
-                        self.public_key_content = "public key is required".to_string();
+                        self.public_key_content = PUBLIC_KEY_REQUIRED.to_string();
                         return Some(Box::new(self.clone()));
                     }
 
                     if validate_field(&self.private_key_content) {
-                        self.private_key_content = "private key is required".to_string();
+                        self.private_key_content = PRIVATE_KEY_REQUIRED.to_string();
                         return Some(Box::new(self.clone()));
                     }
 
@@ -91,14 +114,19 @@ mod logkeys {
                     Field::PrivateKey => {
                         self.private_key_content.pop();
                     }
+                    _ => {}
                 },
 
-                KeyCode::Up if matches!(self.field, Field::PrivateKey) => {
-                    self.field = Field::PublicKey
+                KeyCode::Up => {
+                    if let Some(f) = self.field.toggle_up() {
+                        self.field = f;
+                    };
                 }
 
-                KeyCode::Down if matches!(self.field, Field::PublicKey) => {
-                    self.field = Field::PrivateKey
+                KeyCode::Down => {
+                    if let Some(f) = self.field.toggle_down() {
+                        self.field = f;
+                    };
                 }
 
                 _ => {}
@@ -116,7 +144,7 @@ mod logkeys {
 
             let chunks = Layout::default()
                 .direction(ratatui::layout::Direction::Vertical)
-                .constraints([Constraint::Percentage(20), Constraint::Percentage(70)])
+                .constraints([Constraint::Percentage(5), Constraint::Percentage(90)])
                 .split(size);
 
             let centered = Layout::default()
@@ -140,6 +168,8 @@ mod logkeys {
                     Constraint::Length(3), // pk
                     Constraint::Min(2),
                     Constraint::Length(3), // sk
+                    Constraint::Min(2),
+                    Constraint::Length(1), // gen k
                     Constraint::Min(3),
                 ])
                 .split(centered[1]);
@@ -154,7 +184,7 @@ mod logkeys {
             let mut input_box_pk = Paragraph::new(self.public_key_content.as_str()).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("public key".bold())
+                    .title(" Public key ")
                     .title_alignment(Alignment::Left),
             );
 
@@ -164,23 +194,46 @@ mod logkeys {
             let mut input_box_sk = Paragraph::new(self.private_key_content.as_str()).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("secret key".bold())
+                    .title(" Secret Key ")
                     .title_alignment(Alignment::Left),
             );
 
+            let mut new_keys_par = Paragraph::new("No keypair yet? Generate one.").centered();
+
             match self.field {
                 Field::PrivateKey => {
-                    input_box_sk =
-                        input_box_sk.style(Style::default().fg(ratatui::style::Color::LightYellow));
+                    input_box_sk = Paragraph::new(self.private_key_content.as_str())
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_set(border::DOUBLE)
+                                .title(" Secret Key ".bold())
+                                .title_alignment(Alignment::Left),
+                        )
+                        .style(Style::default().fg(ratatui::style::Color::LightYellow));
                 }
                 Field::PublicKey => {
-                    input_box_pk =
-                        input_box_pk.style(Style::default().fg(ratatui::style::Color::LightYellow));
+                    input_box_pk = Paragraph::new(self.public_key_content.as_str())
+                        .block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_set(border::DOUBLE)
+                                .title(" Public Key ".bold())
+                                .title_alignment(Alignment::Left),
+                        )
+                        .style(Style::default().fg(ratatui::style::Color::LightYellow));
+                }
+
+                Field::GenerateKey => {
+                    new_keys_par =
+                        Paragraph::new("No keypair yet? Generate one.".bold().light_yellow())
+                            .centered();
                 }
             };
 
             f.render_widget(input_box_pk, input_chunks_pk[1]);
             f.render_widget(input_box_sk, input_chunks_sk[1]);
+            f.render_widget(new_keys_par, input_box_layout.split(logkeys_chunks[5])[1]);
         }
     }
 }
