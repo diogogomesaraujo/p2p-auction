@@ -1,7 +1,6 @@
-use crate::blockchain::Blockchain;
-use crate::blockchain::WorldState;
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
+use crate::blockchain::{Blockchain, BlockchainWorldState};
 use crate::state::blockchain::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
 use crate::state::blockchain::transaction_request::Record;
 use crate::state::blockchain::{
@@ -22,6 +21,7 @@ use tracing::info;
 
 #[derive(Debug, Clone)]
 pub struct State {
+    pub world_state: BlockchainWorldState,
     pub rpc_address: SocketAddr,
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
@@ -35,6 +35,7 @@ impl State {
             blockchain: Blockchain::new(u32::MAX)?,
             received_blocks: HashMap::new(),
             notifiers: HashMap::new(),
+            world_state: BlockchainWorldState::new(),
         })
     }
 }
@@ -164,6 +165,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
         request: Request<BlockInfoRequest>,
     ) -> Result<Response<BlockInfoResponse>, Status> {
         let request = request.into_inner();
+
         match self
             .read()
             .await
@@ -174,7 +176,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 status: 0,
                 block: Some(block.clone().into()),
             })),
-            _ => Ok(Response::new(BlockInfoResponse {
+            None => Ok(Response::new(BlockInfoResponse {
                 status: 1,
                 block: None,
             })),

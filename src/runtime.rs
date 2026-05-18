@@ -154,14 +154,18 @@ impl Runtime {
         rebroadcast: bool,
         request_missing: bool,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let notifiers = self.state.read().await.notifiers.clone();
+        let result = {
+            let mut state = self.state.write().await;
 
-        let result = self
-            .state
-            .write()
-            .await
-            .blockchain
-            .accept_block(block.clone(), &notifiers);
+            let State {
+                blockchain,
+                world_state,
+                notifiers,
+                ..
+            } = &mut *state;
+
+            blockchain.accept_block(block.clone(), notifiers, world_state)
+        };
 
         match result {
             Ok(_) => {

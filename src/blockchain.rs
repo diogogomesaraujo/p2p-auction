@@ -698,10 +698,11 @@ impl Blockchain {
     }
 
     /// Function that accepts a block proposed by another node.
-    pub fn accept_block(
+    pub fn accept_block<W: WorldState>(
         &mut self,
         block: Block,
         notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
+        world_state: &mut W,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         if self.blocks.contains_key(&block.hash) {
             return Err("Already known block.".into());
@@ -731,13 +732,13 @@ impl Blockchain {
 
         self.push_block(block);
 
-        self.fix(notifiers)?;
+        self.fix(notifiers, world_state)?;
 
         Ok(())
     }
 
-    fn execute_single_transaction(
-        &mut self,
+    fn execute_single_transaction<W: WorldState>(
+        world_state: &mut W,
         transaction: &Transaction,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         transaction.verify()?;
@@ -752,23 +753,12 @@ impl Blockchain {
                     return Err("Create account nonce must be 0.".into());
                 }
 
-                if self.accounts.contains_key(public_key) {
-                    return Err("Account already exists.".into());
-                }
-
-                self.accounts.insert(
-                    public_key.clone(),
-                    Account {
-                        public_key: public_key.clone(),
-                        nonce: 1,
-                    },
-                );
+                world_state.create_account(public_key.clone())?;
             }
 
             Data::CreateAuction { .. } | Data::Bid { .. } => {
-                let account = self
-                    .accounts
-                    .get_mut(&transaction.from)
+                let account = world_state
+                    .get_account_mut(&transaction.from)
                     .ok_or("Unknown account.")?;
 
                 if transaction.nonce != account.nonce {
@@ -783,7 +773,11 @@ impl Blockchain {
     }
 
     /// Function that notifies RPC clients that the transaction was validated.
-    fn execute_transactions(&mut self, notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>) {
+    fn execute_transactions<W: WorldState>(
+        &mut self,
+        notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
+        world_state: &mut W,
+    ) {
         let mut count = 0;
         for i in self.commited_pointer
             ..(self
@@ -794,7 +788,7 @@ impl Blockchain {
             let h = &self.longest_chain[i];
             if let Some(b) = self.blocks.get(h) {
                 for t in b.transactions.clone() {
-                    let executed = match self.execute_single_transaction(&t) {
+                    let executed = match Self::execute_single_transaction(world_state, &t) {
                         Ok(()) => true,
                         Err(e) => {
                             tracing::warn!("Rejected transaction {}: {}", t.id, e);
@@ -816,10 +810,11 @@ impl Blockchain {
     }
 
     /// Function that appends a block to the blockchain.
-    pub fn propose_block(
+    pub fn propose_block<W: WorldState>(
         &mut self,
         public_key: &str,
         notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
+        world_state: &mut W,
     ) -> Result<Block, Box<dyn Error + Send + Sync>> {
         let transactions = self.transaction_pool.flush();
 
@@ -844,7 +839,7 @@ impl Blockchain {
 
         self.push_block(block_to_append.clone());
 
-        self.fix(notifiers)?;
+        self.fix(notifiers, world_state)?;
 
         Ok(block_to_append)
     }
@@ -958,9 +953,10 @@ impl Blockchain {
 
     /// Function that fixes the blockchain by analysing all branches and choosing the one with smallest hash
     /// or the one that is longest if it has grown more that the constant defined.
-    pub fn fix(
+    pub fn fix<W: WorldState>(
         &mut self,
         notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
+        world_state: &mut W,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // construct branch map
 
@@ -981,7 +977,7 @@ impl Blockchain {
 
         self.prune(&branch_map, notifiers)?;
 
-        self.execute_transactions(notifiers);
+        self.execute_transactions(notifiers, world_state);
 
         Ok(())
     }
@@ -1033,16 +1029,53 @@ impl Blockchain {
 
         Ok(())
     }
-}
 
-/// Trait that defines the functions that can be executed in the blockchain.
-pub trait WorldState {
-    /// Function that gets a block from the chain if it exists.
-    fn get_block_from_hash(&self, hash: &str) -> Option<&Block>;
-}
-
-impl WorldState for Blockchain {
-    fn get_block_from_hash(&self, hash: &str) -> Option<&Block> {
+    pub fn get_block_from_hash(&self, hash: &str) -> Option<&Block> {
         self.blocks.get(hash)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BlockchainWorldState {
+    pub accounts: HashMap<String, Account>,
+}
+
+pub trait WorldState {
+    fn get_account(&self, public_key: &str) -> Option<&Account>;
+    fn get_account_mut(&mut self, public_key: &str) -> Option<&mut Account>;
+    fn create_account(&mut self, public_key: String) -> Result<(), Box<dyn Error + Send + Sync>>;
+}
+
+impl BlockchainWorldState {
+    pub fn new() -> Self {
+        Self {
+            accounts: HashMap::new(),
+        }
+    }
+}
+
+impl WorldState for BlockchainWorldState {
+    fn get_account(&self, public_key: &str) -> Option<&Account> {
+        self.accounts.get(public_key)
+    }
+
+    fn get_account_mut(&mut self, public_key: &str) -> Option<&mut Account> {
+        self.accounts.get_mut(public_key)
+    }
+
+    fn create_account(&mut self, public_key: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if self.accounts.contains_key(&public_key) {
+            return Err("Account already exists.".into());
+        }
+
+        self.accounts.insert(
+            public_key.clone(),
+            Account {
+                public_key,
+                nonce: 1,
+            },
+        );
+
+        Ok(())
     }
 }

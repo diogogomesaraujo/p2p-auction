@@ -5,7 +5,7 @@ use crate::{
         transaction::{Data, Transaction},
     },
     runtime::Runtime,
-    state::Runnable,
+    state::{Runnable, State},
     topic::BLOCKS,
 };
 use async_trait::async_trait;
@@ -118,16 +118,29 @@ pub trait VirtualMachine {
             let public_key: String = keys.public.encode_hex();
             tokio::spawn(async move {
                 loop {
-                    let mut chain = state.read().await.blockchain.clone();
-                    let notifiers = state.read().await.notifiers.clone();
-                    let block = match chain.propose_block(&public_key, &notifiers) {
-                        Ok(b) => b,
-                        _ => continue,
+                    let block = {
+                        let mut state = state.write().await;
+
+                        let State {
+                            blockchain,
+                            world_state,
+                            notifiers,
+                            ..
+                        } = &mut *state;
+
+                        match blockchain.propose_block(&public_key, notifiers, world_state) {
+                            Ok(block) => block,
+                            Err(_) => {
+                                sleep(NEW_BLOCK_SPEED).await;
+                                continue;
+                            }
+                        }
                     };
-                    state.write().await.blockchain = chain;
-                    if let Err(_) = tx.write().await.send(block) {
+
+                    if tx.write().await.send(block).is_err() {
                         error!("Couldn't send the block.");
                     }
+
                     sleep(NEW_BLOCK_SPEED).await;
                 }
             });
