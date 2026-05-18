@@ -1,6 +1,7 @@
 pub mod behaviour;
 pub mod blockchain;
 pub mod boot;
+pub mod bot;
 pub mod key;
 pub mod node;
 pub mod runtime;
