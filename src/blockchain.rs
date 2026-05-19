@@ -25,6 +25,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 use tokio::sync::Notify;
+use tracing::info;
 
 /// Constant that defines the number of blocks that need to be appended before a block's transactions can be executed.
 const EXECUTE_AFTER_N_BLOCKS: usize = 2;
@@ -226,7 +227,7 @@ pub mod transaction {
         },
         state::{
             self,
-            blockchain::{TransactionRequest, transaction_request},
+            service::{TransactionRequest, transaction_request},
         },
         time::{Timestamp, now_unix},
     };
@@ -269,7 +270,7 @@ pub mod transaction {
         fn into(self) -> transaction_request::Record {
             match self {
                 Data::Bid { auction_id, amount } => {
-                    transaction_request::Record::BidRequest(state::blockchain::Bid {
+                    transaction_request::Record::BidRequest(state::service::Bid {
                         auction_id,
                         amount,
                     })
@@ -279,7 +280,7 @@ pub mod transaction {
                     start_amount,
                     stop_time,
                 } => transaction_request::Record::CreateAuctionRequest(
-                    state::blockchain::CreateAuction {
+                    state::service::CreateAuction {
                         auction_id,
                         start_amount,
                         stop_time,
@@ -287,20 +288,20 @@ pub mod transaction {
                 ),
 
                 Data::CreateUserAccount { public_key } => {
-                    transaction_request::Record::CreateAccountRequest(
-                        state::blockchain::CreateAccount { public_key },
-                    )
+                    transaction_request::Record::CreateAccountRequest(state::service::Account {
+                        public_key,
+                    })
                 }
             }
         }
     }
 
-    impl Into<state::blockchain::transaction::Record> for Data {
+    impl Into<state::service::transaction::Record> for Data {
         /// Function that converts the a transaction record into the defined protobuf format.
-        fn into(self) -> state::blockchain::transaction::Record {
+        fn into(self) -> state::service::transaction::Record {
             match self {
                 Data::Bid { auction_id, amount } => {
-                    state::blockchain::transaction::Record::BidRequest(state::blockchain::Bid {
+                    state::service::transaction::Record::BidRequest(state::service::Bid {
                         auction_id,
                         amount,
                     })
@@ -309,16 +310,16 @@ pub mod transaction {
                     auction_id,
                     start_amount,
                     stop_time,
-                } => state::blockchain::transaction::Record::CreateAuctionRequest(
-                    state::blockchain::CreateAuction {
+                } => state::service::transaction::Record::CreateAuctionRequest(
+                    state::service::CreateAuction {
                         auction_id,
                         start_amount,
                         stop_time,
                     },
                 ),
                 Data::CreateUserAccount { public_key } => {
-                    state::blockchain::transaction::Record::CreateAccountRequest(
-                        state::blockchain::CreateAccount { public_key },
+                    state::service::transaction::Record::CreateAccountRequest(
+                        state::service::Account { public_key },
                     )
                 }
             }
@@ -337,10 +338,10 @@ pub mod transaction {
         }
     }
 
-    impl Into<state::blockchain::Transaction> for Transaction {
+    impl Into<state::service::Transaction> for Transaction {
         /// Function that converts the a transaction record into the defined protobuf format.
-        fn into(self) -> state::blockchain::Transaction {
-            state::blockchain::Transaction {
+        fn into(self) -> state::service::Transaction {
+            state::service::Transaction {
                 id: self.id,
                 from: self.from,
                 timestamp: self.timestamp,
@@ -575,10 +576,10 @@ pub mod block {
         pub miner: String,
     }
 
-    impl Into<state::blockchain::Block> for Block {
+    impl Into<state::service::Block> for Block {
         /// Function that converts a block into the defined protobuf format.
-        fn into(self) -> state::blockchain::Block {
-            state::blockchain::Block {
+        fn into(self) -> state::service::Block {
+            state::service::Block {
                 previous_hash: self.previous_hash,
                 transactions: self.transactions.into_iter().map(|t| t.into()).collect(),
                 merkle_root: self.merkle_root,
@@ -1044,6 +1045,8 @@ impl WorldState for Blockchain {
     }
 
     fn create_account(&mut self, public_key: String) -> Result<(), Box<dyn Error + Send + Sync>> {
+        info!("Creating Account: {}", public_key);
+
         if self.accounts.contains_key(&public_key) {
             return Err("Account already exists.".into());
         }

@@ -1,6 +1,7 @@
 FROM rust:latest
 
-RUN apt-get update && apt-get install --no-install-recommends --assume-yes protobuf-compiler
+RUN apt-get update && apt-get install --no-install-recommends --assume-yes protobuf-compiler libxcb-shape0-dev libxcb-xfixes0-dev
+
 
 WORKDIR /app
 

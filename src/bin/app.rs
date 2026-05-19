@@ -2,13 +2,20 @@ use crate::{bye::Bye, logkeys::LogKeys};
 use clap::Parser;
 use color_eyre::eyre::Result;
 use crossterm::event::{self};
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::{DefaultTerminal, Frame, layout::Rect};
 use ratatui_textarea::{Input, Key};
 
 #[async_trait::async_trait]
 pub trait Screen {
-    async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>>;
+    async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>>;
     fn render(&mut self, f: &mut Frame);
+}
+
+#[async_trait::async_trait]
+pub trait Section: Send {
+    async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>>;
+    fn render(&mut self, r: &Rect, f: &mut Frame, focus: bool);
+    fn title(&self) -> String;
 }
 
 mod helper {
@@ -81,10 +88,10 @@ mod logkeys {
         Screen,
         dashboard::Dashboard,
         genkeys::GenKeys,
-        helper::{lines_to_string, validate_field},
+        helper::{lines_to_string, render_popup, validate_field},
     };
-    use blocktion::state::blockchain::{
-        AccountExistsRequest, RequestStatus, node_rpc_service_client::NodeRpcServiceClient,
+    use blocktion::state::service::{
+        Account, AccountExistsRequest, node_rpc_service_client::NodeRpcServiceClient,
     };
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
@@ -167,7 +174,7 @@ mod logkeys {
 
     #[async_trait::async_trait]
     impl Screen for LogKeys<'_> {
-        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>> {
+        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>> {
             if self.waiting.1.load(std::sync::atomic::Ordering::SeqCst) {
                 return None;
             }
@@ -176,6 +183,11 @@ mod logkeys {
                 Input {
                     key: Key::Enter, ..
                 } => {
+                    if let Some(_) = self.popup {
+                        self.popup = None;
+                        return None;
+                    }
+
                     if let Field::GenerateKey = self.field {
                         return Some(Box::new(GenKeys::new(self.node.to_string())));
                     }
@@ -204,22 +216,31 @@ mod logkeys {
                         return None;
                     }
 
+                    let public_key = lines_to_string(self.public_key_textarea.lines());
+
                     match NodeRpcServiceClient::connect(self.node.to_string()).await {
                         Ok(mut conn) => {
                             if let Ok(res) = conn
                                 .account_exists(Request::new(AccountExistsRequest {
-                                    public_key: lines_to_string(self.public_key_textarea.lines()),
+                                    account: Some(Account {
+                                        public_key: public_key.to_string(),
+                                    }),
                                 }))
                                 .await
                             {
                                 let res = res.into_inner();
-                                if res.exists() == RequestStatus::Successful {
-                                    return Some(Box::new(Dashboard::new()));
+                                if res.exists {
+                                    return Some(Box::new(Dashboard::new(&public_key)));
                                 }
                             }
                         }
 
-                        _ => {}
+                        _ => {
+                            self.popup =
+                                Some("Couldn't connect to the node. Try another.".to_string());
+
+                            return None;
+                        }
                     };
 
                     self.popup = Some(
@@ -364,6 +385,10 @@ mod logkeys {
             f.render_widget(&self.public_key_textarea, input_chunks_pk[1]);
             f.render_widget(&self.private_key_textarea, input_chunks_sk[1]);
             f.render_widget(new_keys_par, input_box_layout.split(logkeys_chunks[5])[1]);
+
+            if let Some(p) = self.popup.clone() {
+                render_popup(f, p);
+            }
         }
     }
 }
@@ -378,7 +403,7 @@ mod genkeys {
     };
     use blocktion::{
         blockchain::transaction::{Data, Transaction},
-        state::blockchain::node_rpc_service_client::NodeRpcServiceClient,
+        state::service::node_rpc_service_client::NodeRpcServiceClient,
     };
     use clipboard::{ClipboardContext, ClipboardProvider};
     use ed25519_dalek_blake2b::Keypair;
@@ -445,7 +470,7 @@ mod genkeys {
 
     #[async_trait::async_trait]
     impl Screen for GenKeys {
-        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>> {
+        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>> {
             match input {
                 Input {
                     key: Key::Enter, ..
@@ -506,13 +531,18 @@ mod genkeys {
                             .into();
                             if let Ok(res) = conn.transaction(Request::new(t)).await {
                                 let res = res.into_inner();
+
                                 if res.status == 0 {
                                     return Some(Box::new(logkeys));
                                 }
                             }
                         }
 
-                        _ => {}
+                        _ => {
+                            self.popup =
+                                Some("Couldn't connect to the node. Try another.".to_string());
+                            return None;
+                        }
                     };
 
                     self.popup = Some(
@@ -661,7 +691,7 @@ mod genkeys {
 }
 
 mod dashboard {
-    use crate::Screen;
+    use crate::{Screen, Section, dashboard::options::CreateAuction};
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
         style::{Style, Stylize},
@@ -696,7 +726,154 @@ mod dashboard {
     }
 
     mod options {
-        pub struct CreateAuction;
+        use ratatui::{
+            layout::{Alignment, Constraint, Layout},
+            style::{Style, Stylize},
+            symbols::border,
+            widgets::{Block, Borders},
+        };
+        use ratatui_textarea::{Input, TextArea};
+
+        use crate::{Screen, Section};
+
+        pub enum Field {
+            StartAmount,
+            Duration,
+        }
+
+        pub struct CreateAuction<'a> {
+            pub start_amount_textarea: TextArea<'a>,
+            pub duration_textarea: TextArea<'a>,
+            pub field: Field,
+            pub node: String,
+        }
+
+        impl<'a> CreateAuction<'a> {
+            pub fn new(node: String) -> Self {
+                let mut start_amount_textarea = TextArea::default();
+                let mut duration_textarea = TextArea::default();
+
+                start_amount_textarea.set_block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Start Amount ")
+                        .title_alignment(Alignment::Left),
+                );
+                start_amount_textarea.set_cursor_line_style(Style::default());
+
+                duration_textarea.set_block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Duration ")
+                        .title_alignment(Alignment::Left),
+                );
+                duration_textarea.set_cursor_line_style(Style::default());
+
+                start_amount_textarea.set_placeholder_text(" Insert the amount...");
+                duration_textarea.set_placeholder_text(" Insert the duration in secords...");
+
+                Self {
+                    node,
+                    start_amount_textarea,
+                    duration_textarea,
+                    field: Field::StartAmount,
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl Section for CreateAuction<'_> {
+            fn title(&self) -> String {
+                " Create Auction ".to_string()
+            }
+
+            async fn handle_io(&mut self, _input: Input) -> Option<Box<dyn Screen>> {
+                None
+            }
+
+            fn render(
+                &mut self,
+                r: &ratatui::prelude::Rect,
+                f: &mut ratatui::prelude::Frame,
+                focus: bool,
+            ) {
+                self.start_amount_textarea.set_block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Start Amount ")
+                        .title_alignment(Alignment::Left),
+                );
+                self.start_amount_textarea
+                    .set_style(Style::default().fg(ratatui::style::Color::White));
+                self.start_amount_textarea.set_style(Style::default());
+                self.start_amount_textarea
+                    .set_placeholder_style(Style::default().dark_gray());
+
+                self.duration_textarea.set_block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Secret Key ")
+                        .title_alignment(Alignment::Left),
+                );
+                self.duration_textarea
+                    .set_style(Style::default().fg(ratatui::style::Color::White));
+                self.duration_textarea.set_style(Style::default());
+                self.duration_textarea
+                    .set_placeholder_style(Style::default().dark_gray());
+
+                match self.field {
+                    Field::StartAmount if focus => {
+                        self.start_amount_textarea
+                            .set_placeholder_style(Style::default().white());
+                        self.start_amount_textarea
+                            .set_style(Style::default().white());
+                        self.start_amount_textarea.set_block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_set(border::DOUBLE)
+                                .title(" Start Amount ".bold())
+                                .title_alignment(Alignment::Left)
+                                .style(Style::default().fg(ratatui::style::Color::LightYellow)),
+                        );
+                    }
+                    Field::Duration if focus => {
+                        self.duration_textarea
+                            .set_placeholder_style(Style::default().white());
+                        self.duration_textarea.set_style(Style::default().white());
+                        self.duration_textarea.set_block(
+                            Block::default()
+                                .borders(Borders::ALL)
+                                .border_set(border::DOUBLE)
+                                .title(" Duration ".bold())
+                                .title_alignment(Alignment::Left)
+                                .style(Style::default().fg(ratatui::style::Color::LightYellow)),
+                        );
+                    }
+                    _ => {}
+                };
+
+                let [_, r, _] = Layout::horizontal([
+                    Constraint::Fill(1),
+                    Constraint::Percentage(70),
+                    Constraint::Fill(1),
+                ])
+                .areas(*r);
+
+                let [_, lsa, _, ld, _] = Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        Constraint::Min(3),
+                        Constraint::Length(3),
+                        Constraint::Min(2),
+                        Constraint::Length(3),
+                        Constraint::Min(3),
+                    ])
+                    .areas(r);
+
+                f.render_widget(&self.start_amount_textarea, lsa);
+                f.render_widget(&self.duration_textarea, ld);
+            }
+        }
     }
 
     pub enum Area {
@@ -706,13 +883,15 @@ mod dashboard {
     }
 
     pub struct Dashboard {
+        public_key: String,
         page: Page,
         area: Area,
         options_state: ListState,
+        option: Box<dyn Section>,
     }
 
     impl Dashboard {
-        pub fn new() -> Self {
+        pub fn new(public_key: &str) -> Self {
             let mut options_state = ListState::default();
             options_state.select_first();
 
@@ -720,16 +899,18 @@ mod dashboard {
             menu_state.select_first();
 
             Self {
+                public_key: public_key.to_string(),
                 page: Page::Auctions,
                 area: Area::Menu,
                 options_state,
+                option: Box::new(CreateAuction::new(public_key.to_string())),
             }
         }
     }
 
     #[async_trait::async_trait]
     impl Screen for Dashboard {
-        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>> {
+        async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>> {
             match input {
                 Input {
                     key: Key::Right, ..
@@ -796,7 +977,6 @@ mod dashboard {
             .block(match self.area {
                 Area::Menu => Block::bordered()
                     .title(" Blocktion ".bold().light_yellow())
-                    .border_set(border::DOUBLE)
                     .border_style(Style::default().light_yellow()),
                 _ => Block::bordered().title(" Blocktion "),
             })
@@ -822,7 +1002,6 @@ mod dashboard {
                 .block(match self.area {
                     Area::List => Block::bordered()
                         .title(" Options ".bold().light_yellow())
-                        .border_set(border::DOUBLE)
                         .border_style(Style::default().light_yellow()),
                     _ => Block::bordered().title(" Options "),
                 });
@@ -830,12 +1009,14 @@ mod dashboard {
 
             let page = match self.area {
                 Area::Body => Block::bordered()
-                    .title_alignment(Alignment::Center)
-                    .border_set(border::DOUBLE)
+                    .title(self.option.title().bold())
                     .border_style(Style::default().light_yellow()),
-                _ => Block::bordered(),
+                _ => Block::bordered().title(self.option.title()),
             };
             f.render_widget(page, body_layout);
+
+            self.option
+                .render(&body_layout, f, matches!(self.area, Area::Body));
         }
     }
 }
@@ -856,7 +1037,7 @@ mod bye {
 
     #[async_trait::async_trait]
     impl Screen for Bye {
-        async fn handle_io(&mut self, _input: Input) -> Option<Box<dyn Screen>> {
+        async fn handle_io(&mut self, _input: Input) -> Option<Box<dyn Screen + Send>> {
             {
                 tokio::spawn(async move {
                     sleep(BYE_TIME).await;
@@ -893,6 +1074,7 @@ impl App {
     fn new(node: String) -> Self {
         Self {
             current_screen: Box::new(LogKeys::new(node)),
+            //current_screen: Box::new(Dashboard::new(&node)),
         }
     }
 

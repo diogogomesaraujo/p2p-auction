@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    state::blockchain::node_rpc_service_client::NodeRpcServiceClient,
+    state::service::node_rpc_service_client::NodeRpcServiceClient,
     time::Poisson,
 };
 use async_trait::async_trait;

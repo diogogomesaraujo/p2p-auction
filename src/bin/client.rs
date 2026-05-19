@@ -1,6 +1,9 @@
 use blocktion::{
     blockchain::transaction::{Data, Transaction},
-    state::blockchain::{TransactionResponse, node_rpc_service_client::NodeRpcServiceClient},
+    state::service::{
+        Account, AccountExistsRequest, AccountExistsResponse, TransactionResponse,
+        node_rpc_service_client::NodeRpcServiceClient,
+    },
 };
 use ed25519_dalek_blake2b::Keypair;
 use hex::ToHex;
@@ -32,6 +35,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let status = match res.into_inner() {
         TransactionResponse { status } if status == 0 => "success",
+        _ => "failed",
+    };
+
+    println!("{}", status);
+
+    let res = client
+        .account_exists(Request::new(AccountExistsRequest {
+            account: Some(Account {
+                public_key: keys.public.encode_hex(),
+            }),
+        }))
+        .await?;
+
+    let status = match res.into_inner() {
+        AccountExistsResponse { exists, .. } if exists => "success",
         _ => "failed",
     };
 

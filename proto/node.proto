@@ -3,7 +3,7 @@ package node;
 
 // Request Types
 
-message CreateAccount {
+message Account {
   string public_key = 1;
 }
 
@@ -19,7 +19,7 @@ message CreateAuction {
 }
 message TransactionRequest {
   oneof record {
-    CreateAccount create_account_request = 1;
+    Account create_account_request = 1;
     Bid bid_request = 2;
     CreateAuction create_auction_request = 3;
   }
@@ -36,7 +36,7 @@ message BlockInfoRequest {
 message LongestChainRequest {}
 
 message AccountExistsRequest {
-  string public_key = 1;
+  Account account = 1;
 }
 
 // Response Types
@@ -53,7 +53,7 @@ message TransactionResponse {
 message Transaction {
   string id = 1;
   oneof record {
-    CreateAccount create_account_request = 2;
+    Account create_account_request = 2;
     Bid bid_request = 3;
     CreateAuction create_auction_request = 4;
   }
@@ -84,7 +84,8 @@ message LongestChainResponse {
 }
 
 message AccountExistsResponse {
-  RequestStatus exists = 1;
+  RequestStatus status = 1;
+  bool exists = 2;
 }
 
 service NodeRpcService {

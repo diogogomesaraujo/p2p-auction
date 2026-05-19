@@ -1,12 +1,12 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
 use crate::blockchain::{Blockchain, WorldState};
-use crate::state::blockchain::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
-use crate::state::blockchain::transaction_request::Record;
-use crate::state::blockchain::{
-    AccountExistsRequest, AccountExistsResponse, Bid, BlockInfoRequest, BlockInfoResponse,
-    CreateAccount, CreateAuction, LongestChainRequest, LongestChainResponse, TransactionRequest,
-    TransactionResponse,
+use crate::state::service::AccountExistsRequest;
+use service::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
+use service::transaction_request::Record;
+use service::{
+    Account, AccountExistsResponse, Bid, BlockInfoRequest, BlockInfoResponse, CreateAuction,
+    LongestChainRequest, LongestChainResponse, TransactionRequest, TransactionResponse,
 };
 use std::collections::HashMap;
 use std::error::Error;
@@ -56,7 +56,7 @@ impl Runnable for Arc<RwLock<State>> {
     }
 }
 
-pub mod blockchain {
+pub mod service {
     tonic::include_proto!("node");
 }
 
@@ -84,7 +84,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
         };
 
         let transaction = match record {
-            Record::CreateAccountRequest(CreateAccount { public_key }) => {
+            Record::CreateAccountRequest(Account { public_key }) => {
                 match Transaction::new(
                     Data::CreateUserAccount { public_key },
                     t.from,
@@ -186,15 +186,19 @@ impl NodeRpcService for Arc<RwLock<State>> {
         &self,
         request: Request<AccountExistsRequest>,
     ) -> Result<Response<AccountExistsResponse>, Status> {
-        let exists = match self
-            .read()
-            .await
-            .blockchain
-            .get_account(&request.into_inner().public_key)
-        {
-            Some(_) => 0,
-            None => 1,
+        let public_key = match &request.into_inner().account {
+            Some(account) => account.public_key.clone(),
+            None => {
+                return Ok(Response::new(AccountExistsResponse {
+                    status: 1,
+                    exists: false,
+                }));
+            }
         };
-        Ok(Response::new(AccountExistsResponse { exists }))
+        let exists = match self.read().await.blockchain.get_account(&public_key) {
+            Some(_) => true,
+            None => false,
+        };
+        Ok(Response::new(AccountExistsResponse { status: 0, exists }))
     }
 }
