@@ -1,4 +1,4 @@
-use crate::{bye::Bye, logkeys::LogKeys};
+use crate::{bye::Bye, dashboard::Dashboard, logkeys::LogKeys};
 use clap::Parser;
 use color_eyre::eyre::Result;
 use crossterm::event::{self};
@@ -13,8 +13,9 @@ pub trait Screen {
 
 #[async_trait::async_trait]
 pub trait Section: Send {
-    async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen>>;
+    async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Section>>;
     fn render(&mut self, r: &Rect, f: &mut Frame, focus: bool);
+    fn top(&self) -> bool;
     fn title(&self) -> String;
 }
 
@@ -695,7 +696,6 @@ mod dashboard {
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
         style::{Style, Stylize},
-        symbols::border,
         text::{Line, Span},
         widgets::{Block, List, ListState, Tabs},
     };
@@ -732,7 +732,7 @@ mod dashboard {
             symbols::border,
             widgets::{Block, Borders},
         };
-        use ratatui_textarea::{Input, TextArea};
+        use ratatui_textarea::{Input, Key, TextArea};
 
         use crate::{Screen, Section};
 
@@ -779,6 +779,18 @@ mod dashboard {
                     field: Field::StartAmount,
                 }
             }
+
+            fn toggle_up(&mut self) {
+                self.field = match self.field {
+                    Field::StartAmount | Field::Duration => Field::StartAmount,
+                };
+            }
+
+            fn toggle_down(&mut self) {
+                self.field = match self.field {
+                    Field::StartAmount | Field::Duration => Field::Duration,
+                };
+            }
         }
 
         #[async_trait::async_trait]
@@ -787,7 +799,23 @@ mod dashboard {
                 " Create Auction ".to_string()
             }
 
-            async fn handle_io(&mut self, _input: Input) -> Option<Box<dyn Screen>> {
+            fn top(&self) -> bool {
+                matches!(self.field, Field::StartAmount)
+            }
+
+            async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Section>> {
+                match input {
+                    Input { key: Key::Up, .. } => self.toggle_up(),
+                    Input { key: Key::Down, .. } => self.toggle_down(),
+                    Input { .. } => match self.field {
+                        Field::Duration => {
+                            self.duration_textarea.input(input);
+                        }
+                        Field::StartAmount => {
+                            self.start_amount_textarea.input(input);
+                        }
+                    },
+                }
                 None
             }
 
@@ -812,7 +840,7 @@ mod dashboard {
                 self.duration_textarea.set_block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Secret Key ")
+                        .title(" Duration ")
                         .title_alignment(Alignment::Left),
                 );
                 self.duration_textarea
@@ -913,34 +941,64 @@ mod dashboard {
         async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>> {
             match input {
                 Input {
+                    key: Key::Char('s'),
+                    ctrl: true,
+                    ..
+                } => match self.area {
+                    Area::List => self.area = Area::Body,
+                    Area::Body => self.area = Area::Menu,
+                    Area::Menu => self.area = Area::List,
+                    _ => {}
+                },
+
+                Input {
                     key: Key::Right, ..
                 } => match self.area {
                     Area::Menu => self.page = self.page.next(),
-                    Area::List => self.area = Area::Body,
-                    Area::Body => {}
+                    Area::Body => {
+                        if let Some(s) = self.option.handle_io(input).await {
+                            self.option = s;
+                        }
+                    }
+                    _ => {}
                 },
 
                 Input { key: Key::Left, .. } => match self.area {
                     Area::Menu => self.page = self.page.previous(),
-                    Area::Body => self.area = Area::List,
-                    Area::List => {}
+                    Area::Body => {
+                        if let Some(s) = self.option.handle_io(input).await {
+                            self.option = s;
+                        }
+                    }
+                    _ => {}
                 },
 
                 Input { key: Key::Down, .. } => match self.area {
-                    Area::Menu => self.area = Area::List,
                     Area::List => self.options_state.select_next(),
+                    Area::Body => {
+                        if let Some(s) = self.option.handle_io(input).await {
+                            self.option = s;
+                        }
+                    }
                     _ => {}
                 },
 
                 Input { key: Key::Up, .. } => match self.area {
-                    Area::Menu => {}
-                    Area::List => match self.options_state.selected() {
-                        Some(0) => self.area = Area::Menu,
-                        _ => self.options_state.select_previous(),
-                    },
-                    Area::Body => self.area = Area::Menu,
+                    Area::List => self.options_state.select_previous(),
+                    Area::Body => {
+                        if let Some(s) = self.option.handle_io(input).await {
+                            self.option = s;
+                        }
+                    }
+                    _ => {}
                 },
-                _ => {}
+                _ => {
+                    if let Area::Body = self.area {
+                        if let Some(s) = self.option.handle_io(input).await {
+                            self.option = s;
+                        }
+                    }
+                }
             }
             None
         }
@@ -949,14 +1007,11 @@ mod dashboard {
             let size = f.area();
 
             let block = Block::default()
-                .title_bottom("Use ↑/↓/←/→ to move, enter to continue, ^X to quit")
+                .title_bottom(
+                    "Use ↑/↓/←/→ to move, ^S to switch window, enter to continue, ^X to quit",
+                )
                 .title_alignment(Alignment::Center);
             f.render_widget(block, size);
-
-            let chunks = Layout::default()
-                .direction(ratatui::layout::Direction::Vertical)
-                .constraints([Constraint::Percentage(5), Constraint::Percentage(90)])
-                .split(size);
 
             let [_, centered_menu, _, centered, _] = Layout::vertical([
                 Constraint::Min(2),
@@ -965,7 +1020,7 @@ mod dashboard {
                 Constraint::Percentage(70),
                 Constraint::Min(2),
             ])
-            .areas(chunks[1]);
+            .areas(size);
 
             let menu = Tabs::new(
                 Page::all()
@@ -1073,8 +1128,8 @@ struct App {
 impl App {
     fn new(node: String) -> Self {
         Self {
-            current_screen: Box::new(LogKeys::new(node)),
-            //current_screen: Box::new(Dashboard::new(&node)),
+            //current_screen: Box::new(LogKeys::new(node)),
+            current_screen: Box::new(Dashboard::new(&node)),
         }
     }
 
