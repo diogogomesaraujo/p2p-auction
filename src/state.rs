@@ -192,13 +192,18 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 return Ok(Response::new(AccountExistsResponse {
                     status: 1,
                     exists: false,
+                    nonce: None,
                 }));
             }
         };
-        let exists = match self.read().await.blockchain.get_account(&public_key) {
-            Some(_) => true,
-            None => false,
+        let (exists, nonce) = match self.read().await.blockchain.get_account(&public_key) {
+            Some(account) => (true, Some(account.nonce)),
+            None => (false, None),
         };
-        Ok(Response::new(AccountExistsResponse { status: 0, exists }))
+        Ok(Response::new(AccountExistsResponse {
+            status: 0,
+            exists,
+            nonce,
+        }))
     }
 }

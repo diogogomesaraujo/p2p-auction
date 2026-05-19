@@ -1,4 +1,4 @@
-use crate::{bye::Bye, dashboard::Dashboard, logkeys::LogKeys};
+use crate::{bye::Bye, logkeys::LogKeys};
 use clap::Parser;
 use color_eyre::eyre::Result;
 use crossterm::event::{self};
@@ -17,6 +17,7 @@ pub trait Section: Send {
     fn render(&mut self, r: &Rect, f: &mut Frame, focus: bool);
     fn top(&self) -> bool;
     fn title(&self) -> String;
+    fn has_popup(&self) -> bool;
 }
 
 mod helper {
@@ -25,11 +26,14 @@ mod helper {
     use ed25519_dalek_blake2b::{Keypair, PublicKey, SecretKey};
     use ratatui::{
         Frame,
-        layout::{Alignment, Constraint, Layout},
-        widgets::{Block, Clear, Paragraph, Wrap},
+        layout::{Alignment, Constraint, Layout, Rect},
+        style::{Style, Stylize},
+        symbols::border,
+        widgets::{Block, Borders, Clear, Paragraph, Wrap},
     };
+    use ratatui_textarea::TextArea;
 
-    pub fn validate_field(field: &str) -> bool {
+    pub fn is_empty(field: &str) -> bool {
         field.trim().is_empty()
     }
 
@@ -72,24 +76,49 @@ mod helper {
             .centered()
             .wrap(Wrap { trim: true })
             .alignment(Alignment::Center)
+            .style(Style::default().white())
             .block(
-                Block::bordered()
-                    .title_bottom(" Click enter to close. ")
-                    .title_alignment(Alignment::Center),
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(border::DOUBLE)
+                    .title_bottom(" Click enter to close. ".bold())
+                    .title_alignment(Alignment::Center)
+                    .style(Style::default().fg(ratatui::style::Color::LightYellow)),
             );
         f.render_widget(Clear, l);
         f.render_widget(popup, l);
     }
+
+    pub fn render_private_key_popup<'a>(
+        f: &mut Frame,
+        rect: &Rect,
+        private_key_textarea: &TextArea<'a>,
+    ) {
+        let [_, l, _] = Layout::horizontal([
+            Constraint::Fill(1),
+            Constraint::Percentage(80),
+            Constraint::Fill(1),
+        ])
+        .areas(*rect);
+        let [_, l, _] = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(6),
+            Constraint::Fill(1),
+        ])
+        .areas(l);
+
+        f.render_widget(Clear, l);
+        f.render_widget(private_key_textarea, l);
+    }
 }
 
 mod logkeys {
-    use std::sync::{Arc, atomic::AtomicBool};
 
     use crate::{
         Screen,
         dashboard::Dashboard,
         genkeys::GenKeys,
-        helper::{lines_to_string, render_popup, validate_field},
+        helper::{is_empty, lines_to_string, render_popup},
     };
     use blocktion::state::service::{
         Account, AccountExistsRequest, node_rpc_service_client::NodeRpcServiceClient,
@@ -101,7 +130,6 @@ mod logkeys {
         widgets::{Block, Borders, Paragraph},
     };
     use ratatui_textarea::{Input, Key, TextArea};
-    use tokio::sync::Notify;
     use tonic::Request;
 
     #[derive(Clone)]
@@ -134,7 +162,6 @@ mod logkeys {
         pub private_key_textarea: TextArea<'a>,
         pub field: Field,
         pub node: String,
-        pub waiting: (Arc<Notify>, AtomicBool),
         pub popup: Option<String>,
     }
 
@@ -157,6 +184,8 @@ mod logkeys {
                     .title(" Private Key ")
                     .title_alignment(Alignment::Left),
             );
+
+            private_key_textarea.set_mask_char('\u{2022}');
             private_key_textarea.set_cursor_line_style(Style::default());
 
             public_key_textarea.set_placeholder_text(" Paste your public key here...");
@@ -167,7 +196,6 @@ mod logkeys {
                 public_key_textarea,
                 private_key_textarea,
                 field: Field::PublicKey,
-                waiting: (Arc::new(Notify::new()), AtomicBool::new(false)),
                 popup: None,
             }
         }
@@ -176,10 +204,6 @@ mod logkeys {
     #[async_trait::async_trait]
     impl Screen for LogKeys<'_> {
         async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Screen + Send>> {
-            if self.waiting.1.load(std::sync::atomic::Ordering::SeqCst) {
-                return None;
-            }
-
             match input {
                 Input {
                     key: Key::Enter, ..
@@ -193,7 +217,7 @@ mod logkeys {
                         return Some(Box::new(GenKeys::new(self.node.to_string())));
                     }
 
-                    if validate_field(
+                    if is_empty(
                         &self
                             .public_key_textarea
                             .lines()
@@ -205,7 +229,7 @@ mod logkeys {
                         return None;
                     }
 
-                    if validate_field(
+                    if is_empty(
                         &self
                             .private_key_textarea
                             .lines()
@@ -231,7 +255,7 @@ mod logkeys {
                             {
                                 let res = res.into_inner();
                                 if res.exists {
-                                    return Some(Box::new(Dashboard::new(&public_key)));
+                                    return Some(Box::new(Dashboard::new(&self.node, &public_key)));
                                 }
                             }
                         }
@@ -348,7 +372,7 @@ mod logkeys {
                 .set_placeholder_style(Style::default().dark_gray());
 
             match self.field {
-                Field::PrivateKey => {
+                Field::PrivateKey if matches!(self.popup, None) => {
                     self.private_key_textarea
                         .set_placeholder_style(Style::default().white());
                     self.private_key_textarea
@@ -362,7 +386,7 @@ mod logkeys {
                             .style(Style::default().fg(ratatui::style::Color::LightYellow)),
                     );
                 }
-                Field::PublicKey => {
+                Field::PublicKey if matches!(self.popup, None) => {
                     self.public_key_textarea
                         .set_placeholder_style(Style::default().white());
                     self.public_key_textarea.set_style(Style::default().white());
@@ -376,11 +400,12 @@ mod logkeys {
                     );
                 }
 
-                Field::GenerateKey => {
+                Field::GenerateKey if matches!(self.popup, None) => {
                     new_keys_par =
                         Paragraph::new("No keypair yet? Generate one.".bold().light_yellow())
                             .centered();
                 }
+                _ => {}
             };
 
             f.render_widget(&self.public_key_textarea, input_chunks_pk[1]);
@@ -649,7 +674,7 @@ mod genkeys {
             let mut new_keys_par = Paragraph::new(GENERATE_ANOTHER_PAIR).centered();
 
             match self.field {
-                Field::PrivateKey => {
+                Field::PrivateKey if self.popup == None => {
                     input_box_sk = Paragraph::new(self.private_key_content.as_str())
                         .block(
                             Block::default()
@@ -661,7 +686,7 @@ mod genkeys {
                         )
                         .style(Style::default().fg(ratatui::style::Color::LightYellow));
                 }
-                Field::PublicKey => {
+                Field::PublicKey if self.popup == None => {
                     input_box_pk = Paragraph::new(self.public_key_content.as_str())
                         .block(
                             Block::default()
@@ -674,10 +699,11 @@ mod genkeys {
                         .style(Style::default().fg(ratatui::style::Color::LightYellow));
                 }
 
-                Field::GenerateAnotherKey => {
+                Field::GenerateAnotherKey if self.popup == None => {
                     new_keys_par =
                         Paragraph::new(GENERATE_ANOTHER_PAIR.bold().light_yellow()).centered();
                 }
+                _ => {}
             };
 
             f.render_widget(input_box_pk, input_chunks_pk[1]);
@@ -726,6 +752,19 @@ mod dashboard {
     }
 
     mod options {
+        use blake2::{Blake2b, Digest};
+        use blocktion::{
+            blockchain::{
+                hash,
+                transaction::{Data, Transaction},
+            },
+            state::service::{
+                Account, AccountExistsRequest, RequestStatus,
+                node_rpc_service_client::NodeRpcServiceClient,
+            },
+            time,
+        };
+        use hex::ToHex;
         use ratatui::{
             layout::{Alignment, Constraint, Layout},
             style::{Style, Stylize},
@@ -733,23 +772,33 @@ mod dashboard {
             widgets::{Block, Borders},
         };
         use ratatui_textarea::{Input, Key, TextArea};
+        use tonic::Request;
 
-        use crate::{Screen, Section};
+        use crate::{
+            Section,
+            helper::{
+                is_empty, keypair_from_str, lines_to_string, render_popup, render_private_key_popup,
+            },
+        };
 
         pub enum Field {
             StartAmount,
             Duration,
+            PrivateKey,
         }
 
         pub struct CreateAuction<'a> {
             pub start_amount_textarea: TextArea<'a>,
             pub duration_textarea: TextArea<'a>,
+            pub private_key_textarea: Option<TextArea<'a>>,
             pub field: Field,
             pub node: String,
+            pub public_key: String,
+            pub popup: Option<String>,
         }
 
         impl<'a> CreateAuction<'a> {
-            pub fn new(node: String) -> Self {
+            pub fn new(node: String, public_key: String) -> Self {
                 let mut start_amount_textarea = TextArea::default();
                 let mut duration_textarea = TextArea::default();
 
@@ -765,7 +814,8 @@ mod dashboard {
                     Block::default()
                         .borders(Borders::ALL)
                         .title(" Duration ")
-                        .title_alignment(Alignment::Left),
+                        .title_alignment(Alignment::Left)
+                        .title_bottom(" Click ^Z to cancel. "),
                 );
                 duration_textarea.set_cursor_line_style(Style::default());
 
@@ -774,22 +824,43 @@ mod dashboard {
 
                 Self {
                     node,
+                    public_key,
                     start_amount_textarea,
                     duration_textarea,
+                    private_key_textarea: None,
                     field: Field::StartAmount,
+                    popup: None,
                 }
             }
 
             fn toggle_up(&mut self) {
-                self.field = match self.field {
-                    Field::StartAmount | Field::Duration => Field::StartAmount,
+                match self.field {
+                    Field::StartAmount | Field::Duration => self.field = Field::StartAmount,
+                    _ => {}
                 };
             }
 
             fn toggle_down(&mut self) {
-                self.field = match self.field {
-                    Field::StartAmount | Field::Duration => Field::Duration,
+                match self.field {
+                    Field::StartAmount | Field::Duration => self.field = Field::Duration,
+                    _ => {}
                 };
+            }
+
+            fn private_key_block_focus() -> Block<'a> {
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_set(border::DOUBLE)
+                    .title(" Private Key ".bold())
+                    .title_alignment(Alignment::Left)
+                    .style(Style::default().fg(ratatui::style::Color::LightYellow))
+            }
+
+            fn private_key_block() -> Block<'a> {
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Private Key ")
+                    .title_alignment(Alignment::Left)
             }
         }
 
@@ -803,16 +874,272 @@ mod dashboard {
                 matches!(self.field, Field::StartAmount)
             }
 
+            fn has_popup(&self) -> bool {
+                match &self.popup {
+                    Some(_) => true,
+                    _ => false,
+                }
+            }
+
             async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Section>> {
                 match input {
-                    Input { key: Key::Up, .. } => self.toggle_up(),
-                    Input { key: Key::Down, .. } => self.toggle_down(),
+                    Input {
+                        key: Key::Enter, ..
+                    } => {
+                        if let Some(_) = self.popup {
+                            self.popup = None;
+                            return None;
+                        }
+
+                        let start_amount_text = self
+                            .start_amount_textarea
+                            .lines()
+                            .iter()
+                            .fold(String::new(), |acc, l| [acc, l.clone()].concat());
+                        if is_empty(&start_amount_text) {
+                            self.start_amount_textarea
+                                .set_placeholder_text(" A start amount is required!");
+                            self.start_amount_textarea.clear();
+                            self.field = Field::StartAmount;
+                            return None;
+                        }
+                        let start_amount;
+                        if let Ok(d) = start_amount_text.parse::<u64>() {
+                            start_amount = d;
+                        } else {
+                            self.start_amount_textarea
+                                .set_placeholder_text(" The start amount should be an integer!");
+                            self.start_amount_textarea.clear();
+                            self.field = Field::StartAmount;
+                            return None;
+                        }
+
+                        let duration_text = self
+                            .duration_textarea
+                            .lines()
+                            .iter()
+                            .fold(String::new(), |acc, l| [acc, l.clone()].concat());
+                        if is_empty(&duration_text) {
+                            self.duration_textarea
+                                .set_placeholder_text(" A duration is required!");
+                            self.field = Field::Duration;
+                            return None;
+                        }
+                        let duration;
+                        if let Ok(d) = duration_text.parse::<u64>() {
+                            duration = d;
+                        } else {
+                            self.start_amount_textarea.set_placeholder_text(
+                                " The duration should be an integer representing seconds!",
+                            );
+                            self.field = Field::Duration;
+                            return None;
+                        }
+
+                        if let Some(private_key_textarea) = self.private_key_textarea.clone() {
+                            fn exit_popup(
+                                create_auction: &mut CreateAuction,
+                                error: Option<String>,
+                            ) {
+                                create_auction.popup = error;
+                                create_auction.field = Field::StartAmount;
+                                create_auction.private_key_textarea = None;
+                            }
+
+                            let private_key_text = lines_to_string(private_key_textarea.lines());
+
+                            if is_empty(&private_key_text) {
+                                self.duration_textarea
+                                    .set_placeholder_text(" A private key is required!");
+
+                                exit_popup(&mut self, None);
+
+                                return None;
+                            }
+
+                            match NodeRpcServiceClient::connect(self.node.to_string()).await {
+                                Ok(mut conn) => {
+                                    let keys =
+                                        match keypair_from_str(&self.public_key, &private_key_text)
+                                        {
+                                            Ok(keys) => keys,
+
+                                            Err(_) => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Failed to validate the keys provided."
+                                                            .to_string(),
+                                                    ),
+                                                );
+
+                                                return None;
+                                            }
+                                        };
+
+                                    let now = match time::now_unix() {
+                                        Ok(t) => t,
+
+                                        _ => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some("Failed to get time.".to_string()),
+                                            );
+
+                                            return None;
+                                        }
+                                    };
+
+                                    let id = hash::encode_hash(&hash::hash(
+                                        Blake2b::new(),
+                                        &format!("{}:{}:{}", start_amount, duration, now),
+                                    ));
+
+                                    let nonce = match conn
+                                        .account_exists(Request::new(AccountExistsRequest {
+                                            account: Some(Account {
+                                                public_key: self.public_key.to_string(),
+                                            }),
+                                        }))
+                                        .await
+                                    {
+                                        Ok(a) => match a.into_inner().nonce {
+                                            Some(nonce) => nonce,
+
+                                            None => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Failed to get account nonce.".to_string(),
+                                                    ),
+                                                );
+
+                                                return None;
+                                            }
+                                        },
+
+                                        _ => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some("Failed to get account nonce.".to_string()),
+                                            );
+
+                                            return None;
+                                        }
+                                    };
+
+                                    let transaction = match Transaction::sign(
+                                        Data::CreateAuction {
+                                            auction_id: id,
+                                            start_amount,
+                                            stop_time: now + duration,
+                                        },
+                                        &keys.public.encode_hex::<String>(),
+                                        nonce,
+                                        &keys,
+                                    ) {
+                                        Ok(t) => t,
+
+                                        Err(_) => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some("Failed to sign the create auction transaction."
+                                                    .to_string()),
+                                            );
+
+                                            return None;
+                                        }
+                                    }
+                                    .into();
+
+                                    match conn.transaction(Request::new(transaction)).await {
+                                        Ok(res) => {
+                                            let res = res.into_inner();
+
+                                            if res.status() == RequestStatus::Successful {
+                                                exit_popup(&mut self, Some(
+                                                    "Successfully created the auction on-chain."
+                                                        .to_string(),
+                                                ));
+                                                return None;
+                                            } else {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Failed to create auction on-chain."
+                                                            .to_string(),
+                                                    ),
+                                                );
+                                                return None;
+                                            }
+                                        }
+                                        Err(_) => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some(
+                                                    "Couldn't perform the transaction.".to_string(),
+                                                ),
+                                            );
+                                            return None;
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    exit_popup(
+                                        &mut self,
+                                        Some("Failed to connect to the network.".to_string()),
+                                    );
+                                    return None;
+                                }
+                            }
+                        } else {
+                            let mut private_key_textarea = TextArea::default();
+                            private_key_textarea.set_placeholder_style(Style::default().white());
+                            private_key_textarea.set_style(Style::default().white());
+                            private_key_textarea.set_cursor_line_style(Style::default());
+                            private_key_textarea.set_mask_char('\u{2022}');
+                            private_key_textarea.set_block(Self::private_key_block_focus());
+                            private_key_textarea.set_placeholder_text(
+                                " Insert your private key (click ^Z to cancel)...",
+                            );
+
+                            self.private_key_textarea = Some(private_key_textarea);
+                            self.field = Field::PrivateKey;
+                        }
+                    }
+
+                    Input {
+                        key: Key::Char('z'),
+                        ctrl: true,
+                        ..
+                    } => {
+                        self.private_key_textarea = None;
+                        self.field = Field::StartAmount;
+                    }
+
+                    Input { key: Key::Up, .. } => {
+                        if !matches!(self.field, Field::PrivateKey) {
+                            self.toggle_up()
+                        }
+                    }
+
+                    Input { key: Key::Down, .. } => {
+                        if !matches!(self.field, Field::PrivateKey) {
+                            self.toggle_down()
+                        }
+                    }
+
                     Input { .. } => match self.field {
                         Field::Duration => {
                             self.duration_textarea.input(input);
                         }
                         Field::StartAmount => {
                             self.start_amount_textarea.input(input);
+                        }
+                        Field::PrivateKey => {
+                            if let Some(private_key_textarea) = self.private_key_textarea.as_mut() {
+                                private_key_textarea.input(input);
+                            }
                         }
                     },
                 }
@@ -850,7 +1177,7 @@ mod dashboard {
                     .set_placeholder_style(Style::default().dark_gray());
 
                 match self.field {
-                    Field::StartAmount if focus => {
+                    Field::StartAmount if focus && matches!(self.private_key_textarea, None) => {
                         self.start_amount_textarea
                             .set_placeholder_style(Style::default().white());
                         self.start_amount_textarea
@@ -864,7 +1191,7 @@ mod dashboard {
                                 .style(Style::default().fg(ratatui::style::Color::LightYellow)),
                         );
                     }
-                    Field::Duration if focus => {
+                    Field::Duration if focus && matches!(self.private_key_textarea, None) => {
                         self.duration_textarea
                             .set_placeholder_style(Style::default().white());
                         self.duration_textarea.set_style(Style::default().white());
@@ -900,6 +1227,20 @@ mod dashboard {
 
                 f.render_widget(&self.start_amount_textarea, lsa);
                 f.render_widget(&self.duration_textarea, ld);
+
+                if let Some(p) = self.popup.clone() {
+                    render_popup(f, p);
+                }
+
+                if let Some(p) = self.private_key_textarea.as_mut() {
+                    if !focus {
+                        p.set_block(Self::private_key_block());
+                    } else {
+                        p.set_block(Self::private_key_block_focus());
+                    }
+                    self.popup = None;
+                    render_private_key_popup(f, &r, &p);
+                }
             }
         }
     }
@@ -919,7 +1260,7 @@ mod dashboard {
     }
 
     impl Dashboard {
-        pub fn new(public_key: &str) -> Self {
+        pub fn new(node: &str, public_key: &str) -> Self {
             let mut options_state = ListState::default();
             options_state.select_first();
 
@@ -931,7 +1272,7 @@ mod dashboard {
                 page: Page::Auctions,
                 area: Area::Menu,
                 options_state,
-                option: Box::new(CreateAuction::new(public_key.to_string())),
+                option: Box::new(CreateAuction::new(node.to_string(), public_key.to_string())),
             }
         }
     }
@@ -944,12 +1285,15 @@ mod dashboard {
                     key: Key::Char('s'),
                     ctrl: true,
                     ..
-                } => match self.area {
-                    Area::List => self.area = Area::Body,
-                    Area::Body => self.area = Area::Menu,
-                    Area::Menu => self.area = Area::List,
-                    _ => {}
-                },
+                } => {
+                    if !self.option.has_popup() {
+                        match self.area {
+                            Area::List => self.area = Area::Body,
+                            Area::Body => self.area = Area::Menu,
+                            Area::Menu => self.area = Area::List,
+                        }
+                    }
+                }
 
                 Input {
                     key: Key::Right, ..
@@ -1128,8 +1472,8 @@ struct App {
 impl App {
     fn new(node: String) -> Self {
         Self {
-            //current_screen: Box::new(LogKeys::new(node)),
-            current_screen: Box::new(Dashboard::new(&node)),
+            current_screen: Box::new(LogKeys::new(node)),
+            //current_screen: Box::new(Dashboard::new(&node, "blabla")),
         }
     }
 
