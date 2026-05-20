@@ -1,12 +1,14 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
 use crate::blockchain::{Blockchain, WorldState};
-use crate::state::service::AccountExistsRequest;
+use crate::state::service::{
+    AccountExistsRequest, AuctionExistsRequest, AuctionExistsResponse, StopAuction,
+};
 use service::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
 use service::transaction_request::Record;
 use service::{
     Account, AccountExistsResponse, Bid, BlockInfoRequest, BlockInfoResponse, CreateAuction,
-    LongestChainRequest, LongestChainResponse, TransactionRequest, TransactionResponse,
+    TransactionRequest, TransactionResponse,
 };
 use std::collections::HashMap;
 use std::error::Error;
@@ -62,14 +64,33 @@ pub mod service {
 
 #[tonic::async_trait]
 impl NodeRpcService for Arc<RwLock<State>> {
-    async fn longest_chain(
+    async fn auction_exists(
         &self,
-        _request: Request<LongestChainRequest>,
-    ) -> Result<Response<LongestChainResponse>, Status> {
-        Ok(Response::new(LongestChainResponse {
-            status: 0,
-            longest_chain: self.read().await.blockchain.longest_chain.clone(),
-        }))
+        request: Request<AuctionExistsRequest>,
+    ) -> Result<Response<AuctionExistsResponse>, Status> {
+        let req = request.into_inner();
+        let blocks = self.read().await.blockchain.blocks.clone();
+        let b = blocks.into_iter().find(|b| {
+            b.1.transactions.iter().any(|t| {
+                if let Data::CreateAuction { auction_id, .. } = &t.record
+                    && auction_id == &req.auction_id
+                {
+                    true
+                } else {
+                    false
+                }
+            })
+        });
+        match b {
+            Some(b) => Ok(Response::new(AuctionExistsResponse {
+                status: 0,
+                block_hash: Some(b.1.hash.to_string()),
+            })),
+            _ => Ok(Response::new(AuctionExistsResponse {
+                status: 0,
+                block_hash: None,
+            })),
+        }
     }
 
     async fn transaction(
@@ -119,6 +140,18 @@ impl NodeRpcService for Arc<RwLock<State>> {
             Record::BidRequest(Bid { auction_id, amount }) => {
                 match Transaction::new(
                     Data::Bid { auction_id, amount },
+                    t.from,
+                    t.nonce,
+                    &t.signature,
+                ) {
+                    Ok(t) => t,
+                    _ => return Ok(Response::new(TransactionResponse { status: 1 })),
+                }
+            }
+
+            Record::StopAuctionRequest(StopAuction { auction_id }) => {
+                match Transaction::new(
+                    Data::StopAuction { auction_id },
                     t.from,
                     t.nonce,
                     &t.signature,
@@ -191,19 +224,14 @@ impl NodeRpcService for Arc<RwLock<State>> {
             None => {
                 return Ok(Response::new(AccountExistsResponse {
                     status: 1,
-                    exists: false,
                     nonce: None,
                 }));
             }
         };
-        let (exists, nonce) = match self.read().await.blockchain.get_account(&public_key) {
-            Some(account) => (true, Some(account.nonce)),
-            None => (false, None),
+        let nonce = match self.read().await.blockchain.get_account(&public_key) {
+            Some(account) => Some(account.nonce),
+            None => None,
         };
-        Ok(Response::new(AccountExistsResponse {
-            status: 0,
-            exists,
-            nonce,
-        }))
+        Ok(Response::new(AccountExistsResponse { status: 0, nonce }))
     }
 }

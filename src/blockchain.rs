@@ -263,6 +263,9 @@ pub mod transaction {
             start_amount: u64,
             stop_time: Timestamp,
         },
+        StopAuction {
+            auction_id: String,
+        },
     }
 
     impl Into<transaction_request::Record> for Data {
@@ -290,6 +293,12 @@ pub mod transaction {
                 Data::CreateUserAccount { public_key } => {
                     transaction_request::Record::CreateAccountRequest(state::service::Account {
                         public_key,
+                    })
+                }
+
+                Data::StopAuction { auction_id } => {
+                    transaction_request::Record::StopAuctionRequest(state::service::StopAuction {
+                        auction_id,
                     })
                 }
             }
@@ -320,6 +329,11 @@ pub mod transaction {
                 Data::CreateUserAccount { public_key } => {
                     state::service::transaction::Record::CreateAccountRequest(
                         state::service::Account { public_key },
+                    )
+                }
+                Data::StopAuction { auction_id } => {
+                    state::service::transaction::Record::StopAuctionRequest(
+                        state::service::StopAuction { auction_id },
                     )
                 }
             }
@@ -665,6 +679,7 @@ pub struct Blockchain {
     pub difficulty: u32,
     pub pruned: HashSet<String>,
     pub accounts: HashMap<String, Account>,
+    pub auctions: HashMap<String, (String, u64)>,
 }
 
 impl Blockchain {
@@ -675,6 +690,7 @@ impl Blockchain {
             blocks: HashMap::new(),
             pruned: HashSet::new(),
             accounts: HashMap::new(),
+            auctions: HashMap::new(),
             longest_chain: vec![],
             commited_pointer: 0,
             difficulty,
@@ -740,6 +756,7 @@ impl Blockchain {
     fn execute_single_transaction(
         &mut self,
         transaction: &Transaction,
+        block_hash: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         transaction.verify()?;
 
@@ -756,7 +773,7 @@ impl Blockchain {
                 self.create_account(public_key.clone())?;
             }
 
-            Data::CreateAuction { .. } | Data::Bid { .. } => {
+            Data::Bid { .. } => {
                 let account = self
                     .get_account_mut(&transaction.from)
                     .ok_or("Unknown account.")?;
@@ -766,6 +783,49 @@ impl Blockchain {
                 }
 
                 account.nonce += 1;
+            }
+
+            Data::CreateAuction {
+                auction_id,
+                stop_time,
+                ..
+            } => {
+                let account = self
+                    .get_account_mut(&transaction.from)
+                    .ok_or("Unknown account.")?;
+
+                if transaction.nonce != account.nonce {
+                    return Err("Invalid nonce.".into());
+                }
+
+                account.nonce += 1;
+
+                self.create_auction(auction_id, &block_hash, *stop_time);
+            }
+
+            Data::StopAuction { auction_id } => {
+                if let Some(start_auction_transaction) = self.get_auction(auction_id) {
+                    if let Data::CreateAuction { stop_time, .. } = start_auction_transaction.record
+                    {
+                        if transaction.timestamp < stop_time
+                            && transaction.from != start_auction_transaction.from
+                        {
+                            return Err("Only the creator can end the auction early.".into());
+                        }
+                    }
+                }
+
+                let account = self
+                    .get_account_mut(&transaction.from)
+                    .ok_or("Unknown account.")?;
+
+                if transaction.nonce != account.nonce {
+                    return Err("Invalid nonce.".into());
+                }
+
+                account.nonce += 1;
+
+                self.remove_auction(auction_id);
             }
         }
 
@@ -782,9 +842,9 @@ impl Blockchain {
                 .saturating_sub(EXECUTE_AFTER_N_BLOCKS))
         {
             let h = &self.longest_chain[i];
-            if let Some(b) = self.blocks.get(h) {
+            if let Some(b) = self.blocks.get(h).cloned() {
                 for t in b.transactions.clone() {
-                    let executed = match self.execute_single_transaction(&t) {
+                    let executed = match self.execute_single_transaction(&t, &b.hash) {
                         Ok(()) => true,
                         Err(e) => {
                             tracing::warn!("Rejected transaction {}: {}", t.id, e);
@@ -1037,6 +1097,9 @@ pub trait WorldState {
     fn get_account(&self, public_key: &str) -> Option<&Account>;
     fn get_account_mut(&mut self, public_key: &str) -> Option<&mut Account>;
     fn create_account(&mut self, public_key: String) -> Result<(), Box<dyn Error + Send + Sync>>;
+    fn create_auction(&mut self, auction_id: &str, block_id: &str, stop_time: u64);
+    fn get_auction(&mut self, auction_id: &str) -> Option<&Transaction>;
+    fn remove_auction(&mut self, auction_id: &str);
 }
 
 impl WorldState for Blockchain {
@@ -1046,6 +1109,34 @@ impl WorldState for Blockchain {
 
     fn get_account_mut(&mut self, public_key: &str) -> Option<&mut Account> {
         self.accounts.get_mut(public_key)
+    }
+
+    fn get_auction(&mut self, auction_id: &str) -> Option<&Transaction> {
+        if let Some((block_id, _)) = self.auctions.get(auction_id) {
+            if let Some(block) = self.blocks.get(block_id) {
+                return block.transactions.iter().find(|t| {
+                    if let Data::CreateAuction {
+                        auction_id: aid, ..
+                    } = &t.record
+                        && aid == auction_id
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+        }
+        None
+    }
+
+    fn create_auction(&mut self, auction_id: &str, block_id: &str, stop_time: u64) {
+        self.auctions
+            .insert(auction_id.to_string(), (block_id.to_string(), stop_time));
+    }
+
+    fn remove_auction(&mut self, auction_id: &str) {
+        self.auctions.remove(auction_id);
     }
 
     fn create_account(&mut self, public_key: String) -> Result<(), Box<dyn Error + Send + Sync>> {

@@ -21,8 +21,6 @@ pub trait Section: Send {
 }
 
 mod helper {
-    use std::error::Error;
-
     use ed25519_dalek_blake2b::{Keypair, PublicKey, SecretKey};
     use ratatui::{
         Frame,
@@ -32,6 +30,7 @@ mod helper {
         widgets::{Block, Borders, Clear, Paragraph, Wrap},
     };
     use ratatui_textarea::TextArea;
+    use std::error::Error;
 
     pub fn is_empty(field: &str) -> bool {
         field.trim().is_empty()
@@ -270,7 +269,7 @@ mod logkeys {
                                 .await
                             {
                                 let res = res.into_inner();
-                                if res.exists {
+                                if let Some(_) = res.nonce {
                                     return Some(Box::new(Dashboard::new(&self.node, &public_key)));
                                 }
                             }
@@ -1269,8 +1268,8 @@ mod dashboard {
         use blocktion::{
             blockchain::transaction::{Data, Transaction},
             state::service::{
-                Account, AccountExistsRequest, RequestStatus,
-                node_rpc_service_client::NodeRpcServiceClient,
+                Account, AccountExistsRequest, AuctionExistsRequest, BlockInfoRequest,
+                RequestStatus, node_rpc_service_client::NodeRpcServiceClient,
             },
         };
         use hex::ToHex;
@@ -1440,6 +1439,80 @@ mod dashboard {
 
                             match NodeRpcServiceClient::connect(self.node.to_string()).await {
                                 Ok(mut conn) => {
+                                    let auction_block_hash = match conn
+                                        .auction_exists(Request::new(AuctionExistsRequest {
+                                            auction_id: auction_id_text.to_string(),
+                                        }))
+                                        .await
+                                    {
+                                        Ok(res) => match res.into_inner().block_hash {
+                                            Some(bh) => bh,
+                                            None => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "The node does not recognize the auction."
+                                                            .to_string(),
+                                                    ),
+                                                );
+                                                return None;
+                                            }
+                                        },
+                                        _ => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some("The node failed to respond.".to_string()),
+                                            );
+                                            return None;
+                                        }
+                                    };
+
+                                    let mut hash = auction_block_hash;
+                                    let mut highest_bid = amount;
+
+                                    loop {
+                                        match conn
+                                            .block_info(Request::new(BlockInfoRequest { hash }))
+                                            .await
+                                        {
+                                            Ok(res) => match res.into_inner().block {
+                                                Some(b) => {
+                                                    highest_bid = b.transactions.iter().fold(
+                                                        highest_bid,
+                                                        |acc, t| {
+                                                            if let Some(blocktion::state::service::transaction::Record::BidRequest(bid)) = &t.record {
+                                                                return u64::max(bid.amount, acc);
+                                                            }
+                                                            acc
+                                                        },
+                                                    );
+                                                    hash = b.hash;
+                                                }
+                                                None => {
+                                                    break;
+                                                }
+                                            },
+                                            _ => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some("The node failed to respond.".to_string()),
+                                                );
+                                                return None;
+                                            }
+                                        }
+                                    }
+
+                                    if highest_bid >= amount {
+                                        exit_popup(
+                                            &mut self,
+                                            Some(
+                                                "There is already a higher or equal bid on-chain."
+                                                    .to_string(),
+                                            ),
+                                        );
+                                        return None;
+                                    }
+
                                     let keys =
                                         match keypair_from_str(&self.public_key, &private_key_text)
                                         {

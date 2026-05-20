@@ -17,11 +17,17 @@ message CreateAuction {
   uint64 start_amount = 2;
   uint64 stop_time = 3;
 }
+
+message StopAuction {
+  string auction_id = 1;
+}
+
 message TransactionRequest {
   oneof record {
     Account create_account_request = 1;
     Bid bid_request = 2;
     CreateAuction create_auction_request = 3;
+    StopAuction stop_auction_request = 4;
   }
 
   string signature = 5;
@@ -33,10 +39,12 @@ message BlockInfoRequest {
   string hash = 1;
 }
 
-message LongestChainRequest {}
-
 message AccountExistsRequest {
   Account account = 1;
+}
+
+message AuctionExistsRequest {
+  string auction_id = 1;
 }
 
 // Response Types
@@ -56,6 +64,7 @@ message Transaction {
     Account create_account_request = 2;
     Bid bid_request = 3;
     CreateAuction create_auction_request = 4;
+    StopAuction stop_auction_request = 5;
   }
   string from = 6;
   uint64 timestamp = 7;
@@ -78,20 +87,19 @@ message BlockInfoResponse {
   optional Block block = 2;
 }
 
-message LongestChainResponse {
-  RequestStatus status = 1;
-  repeated string longest_chain = 2;
-}
-
 message AccountExistsResponse {
   RequestStatus status = 1;
-  bool exists = 2;
   optional uint32 nonce = 3;
+}
+
+message AuctionExistsResponse {
+  RequestStatus status = 1;
+  optional string block_hash = 3;
 }
 
 service NodeRpcService {
   rpc Transaction(TransactionRequest) returns (TransactionResponse);
   rpc BlockInfo(BlockInfoRequest) returns (BlockInfoResponse);
-  rpc LongestChain(LongestChainRequest) returns (LongestChainResponse);
   rpc AccountExists(AccountExistsRequest) returns (AccountExistsResponse);
+  rpc AuctionExists(AuctionExistsRequest) returns (AuctionExistsResponse);
 }
