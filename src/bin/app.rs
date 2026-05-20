@@ -110,6 +110,22 @@ mod helper {
         f.render_widget(Clear, l);
         f.render_widget(private_key_textarea, l);
     }
+
+    pub fn private_key_block_focus<'a>() -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_set(border::DOUBLE)
+            .title(" Private Key ".bold())
+            .title_alignment(Alignment::Left)
+            .style(Style::default().fg(ratatui::style::Color::LightYellow))
+    }
+
+    pub fn private_key_block<'a>() -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Private Key ")
+            .title_alignment(Alignment::Left)
+    }
 }
 
 mod logkeys {
@@ -718,7 +734,12 @@ mod genkeys {
 }
 
 mod dashboard {
-    use crate::{Screen, Section, dashboard::options::CreateAuction};
+    use std::collections::HashMap;
+
+    use crate::{
+        Screen, Section,
+        dashboard::{bid::Bid, options::create_auction::CreateAuction},
+    };
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
         style::{Style, Stylize},
@@ -727,7 +748,7 @@ mod dashboard {
     };
     use ratatui_textarea::{Input, Key};
 
-    #[derive(Clone)]
+    #[derive(Clone, Hash, Eq, PartialEq)]
     pub enum Page {
         Auctions = 0,
         ProfileHistory = 1,
@@ -752,17 +773,505 @@ mod dashboard {
     }
 
     mod options {
-        use blake2::{Blake2b, Digest};
+        pub mod create_auction {
+            use blake2::{Blake2b, Digest};
+            use blocktion::{
+                blockchain::{
+                    hash,
+                    transaction::{Data, Transaction},
+                },
+                state::service::{
+                    Account, AccountExistsRequest, RequestStatus,
+                    node_rpc_service_client::NodeRpcServiceClient,
+                },
+                time,
+            };
+            use hex::ToHex;
+            use ratatui::{
+                layout::{Alignment, Constraint, Layout},
+                style::{Style, Stylize},
+                symbols::border,
+                widgets::{Block, Borders},
+            };
+            use ratatui_textarea::{Input, Key, TextArea};
+            use tonic::Request;
+
+            use crate::{
+                Section,
+                helper::{
+                    is_empty, keypair_from_str, lines_to_string, private_key_block,
+                    private_key_block_focus, render_popup, render_private_key_popup,
+                },
+            };
+
+            pub enum Field {
+                StartAmount,
+                Duration,
+                PrivateKey,
+            }
+
+            pub struct CreateAuction<'a> {
+                pub start_amount_textarea: TextArea<'a>,
+                pub duration_textarea: TextArea<'a>,
+                pub private_key_textarea: Option<TextArea<'a>>,
+                pub field: Field,
+                pub node: String,
+                pub public_key: String,
+                pub popup: Option<String>,
+            }
+
+            impl<'a> CreateAuction<'a> {
+                pub fn new(node: String, public_key: String) -> Self {
+                    let mut start_amount_textarea = TextArea::default();
+                    let mut duration_textarea = TextArea::default();
+
+                    start_amount_textarea.set_block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Start Amount ")
+                            .title_alignment(Alignment::Left),
+                    );
+                    start_amount_textarea.set_cursor_line_style(Style::default());
+
+                    duration_textarea.set_block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Duration ")
+                            .title_alignment(Alignment::Left)
+                            .title_bottom(" Click ^Z to cancel. "),
+                    );
+                    duration_textarea.set_cursor_line_style(Style::default());
+
+                    start_amount_textarea.set_placeholder_text(" Insert the amount...");
+                    duration_textarea.set_placeholder_text(" Insert the duration in secords...");
+
+                    Self {
+                        node,
+                        public_key,
+                        start_amount_textarea,
+                        duration_textarea,
+                        private_key_textarea: None,
+                        field: Field::StartAmount,
+                        popup: None,
+                    }
+                }
+
+                fn toggle_up(&mut self) {
+                    match self.field {
+                        Field::StartAmount | Field::Duration => self.field = Field::StartAmount,
+                        _ => {}
+                    };
+                }
+
+                fn toggle_down(&mut self) {
+                    match self.field {
+                        Field::StartAmount | Field::Duration => self.field = Field::Duration,
+                        _ => {}
+                    };
+                }
+            }
+
+            #[async_trait::async_trait]
+            impl Section for CreateAuction<'_> {
+                fn title(&self) -> String {
+                    " Create Auction ".to_string()
+                }
+
+                fn top(&self) -> bool {
+                    matches!(self.field, Field::StartAmount)
+                }
+
+                fn has_popup(&self) -> bool {
+                    match &self.popup {
+                        Some(_) => true,
+                        _ => false,
+                    }
+                }
+
+                async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Section>> {
+                    match input {
+                        Input {
+                            key: Key::Enter, ..
+                        } => {
+                            if let Some(_) = self.popup {
+                                self.popup = None;
+                                return None;
+                            }
+
+                            let start_amount_text = self
+                                .start_amount_textarea
+                                .lines()
+                                .iter()
+                                .fold(String::new(), |acc, l| [acc, l.clone()].concat());
+                            if is_empty(&start_amount_text) {
+                                self.start_amount_textarea
+                                    .set_placeholder_text(" A start amount is required!");
+                                self.start_amount_textarea.cut();
+                                self.field = Field::StartAmount;
+                                return None;
+                            }
+                            let start_amount;
+                            if let Ok(d) = start_amount_text.parse::<u64>() {
+                                start_amount = d;
+                            } else {
+                                self.start_amount_textarea.set_placeholder_text(
+                                    " The start amount should be an integer!",
+                                );
+                                self.start_amount_textarea.cut();
+                                self.field = Field::StartAmount;
+                                return None;
+                            }
+
+                            let duration_text = self
+                                .duration_textarea
+                                .lines()
+                                .iter()
+                                .fold(String::new(), |acc, l| [acc, l.clone()].concat());
+                            if is_empty(&duration_text) {
+                                self.duration_textarea
+                                    .set_placeholder_text(" A duration is required!");
+                                self.field = Field::Duration;
+                                return None;
+                            }
+                            let duration;
+                            if let Ok(d) = duration_text.parse::<u64>() {
+                                duration = d;
+                            } else {
+                                self.start_amount_textarea.set_placeholder_text(
+                                    " The duration should be an integer representing seconds!",
+                                );
+                                self.field = Field::Duration;
+                                return None;
+                            }
+
+                            if let Some(private_key_textarea) = self.private_key_textarea.as_mut() {
+                                fn exit_popup(
+                                    create_auction: &mut CreateAuction,
+                                    error: Option<String>,
+                                ) {
+                                    create_auction.popup = error;
+                                    create_auction.field = Field::StartAmount;
+                                    create_auction.private_key_textarea = None;
+                                }
+
+                                let private_key_text =
+                                    lines_to_string(private_key_textarea.lines());
+
+                                if is_empty(&private_key_text) {
+                                    private_key_textarea
+                                        .set_placeholder_text(" A private key is required!");
+
+                                    exit_popup(&mut self, None);
+
+                                    return None;
+                                }
+
+                                match NodeRpcServiceClient::connect(self.node.to_string()).await {
+                                    Ok(mut conn) => {
+                                        let keys = match keypair_from_str(
+                                            &self.public_key,
+                                            &private_key_text,
+                                        ) {
+                                            Ok(keys) => keys,
+
+                                            Err(_) => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Failed to validate the keys provided."
+                                                            .to_string(),
+                                                    ),
+                                                );
+
+                                                return None;
+                                            }
+                                        };
+
+                                        let now = match time::now_unix() {
+                                            Ok(t) => t,
+
+                                            _ => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some("Failed to get time.".to_string()),
+                                                );
+
+                                                return None;
+                                            }
+                                        };
+
+                                        let id = hash::encode_hash(&hash::hash(
+                                            Blake2b::new(),
+                                            &format!("{}:{}:{}", start_amount, duration, now),
+                                        ));
+
+                                        let nonce = match conn
+                                            .account_exists(Request::new(AccountExistsRequest {
+                                                account: Some(Account {
+                                                    public_key: self.public_key.to_string(),
+                                                }),
+                                            }))
+                                            .await
+                                        {
+                                            Ok(a) => match a.into_inner().nonce {
+                                                Some(nonce) => nonce,
+
+                                                None => {
+                                                    exit_popup(
+                                                        &mut self,
+                                                        Some(
+                                                            "Failed to get account nonce."
+                                                                .to_string(),
+                                                        ),
+                                                    );
+
+                                                    return None;
+                                                }
+                                            },
+
+                                            _ => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Failed to get account nonce.".to_string(),
+                                                    ),
+                                                );
+
+                                                return None;
+                                            }
+                                        };
+
+                                        let transaction = match Transaction::sign(
+                                        Data::CreateAuction {
+                                            auction_id: id,
+                                            start_amount,
+                                            stop_time: now + duration,
+                                        },
+                                        &keys.public.encode_hex::<String>(),
+                                        nonce,
+                                        &keys,
+                                    ) {
+                                        Ok(t) => t,
+
+                                        Err(_) => {
+                                            exit_popup(
+                                                &mut self,
+                                                Some("Failed to sign the create auction transaction."
+                                                    .to_string()),
+                                            );
+
+                                            return None;
+                                        }
+                                    }
+                                    .into();
+
+                                        match conn.transaction(Request::new(transaction)).await {
+                                            Ok(res) => {
+                                                let res = res.into_inner();
+
+                                                if res.status() == RequestStatus::Successful {
+                                                    exit_popup(&mut self, Some(
+                                                    "Successfully created the auction on-chain."
+                                                        .to_string(),
+                                                ));
+                                                    return None;
+                                                } else {
+                                                    exit_popup(
+                                                        &mut self,
+                                                        Some(
+                                                            "Failed to create auction on-chain."
+                                                                .to_string(),
+                                                        ),
+                                                    );
+                                                    return None;
+                                                }
+                                            }
+                                            Err(_) => {
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Couldn't perform the transaction."
+                                                            .to_string(),
+                                                    ),
+                                                );
+                                                return None;
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        exit_popup(
+                                            &mut self,
+                                            Some("Failed to connect to the network.".to_string()),
+                                        );
+                                        return None;
+                                    }
+                                }
+                            } else {
+                                let mut private_key_textarea = TextArea::default();
+                                private_key_textarea
+                                    .set_placeholder_style(Style::default().white());
+                                private_key_textarea.set_style(Style::default().white());
+                                private_key_textarea.set_cursor_line_style(Style::default());
+                                private_key_textarea.set_mask_char('\u{2022}');
+                                private_key_textarea.set_block(private_key_block_focus());
+                                private_key_textarea.set_placeholder_text(
+                                    " Insert your private key (click ^Z to cancel)...",
+                                );
+
+                                self.private_key_textarea = Some(private_key_textarea);
+                                self.field = Field::PrivateKey;
+                            }
+                        }
+
+                        Input {
+                            key: Key::Char('z'),
+                            ctrl: true,
+                            ..
+                        } => {
+                            self.private_key_textarea = None;
+                            self.field = Field::StartAmount;
+                        }
+
+                        Input { key: Key::Up, .. } => {
+                            if !matches!(self.field, Field::PrivateKey) {
+                                self.toggle_up()
+                            }
+                        }
+
+                        Input { key: Key::Down, .. } => {
+                            if !matches!(self.field, Field::PrivateKey) {
+                                self.toggle_down()
+                            }
+                        }
+
+                        Input { .. } => match self.field {
+                            Field::Duration => {
+                                self.duration_textarea.input(input);
+                            }
+                            Field::StartAmount => {
+                                self.start_amount_textarea.input(input);
+                            }
+                            Field::PrivateKey => {
+                                if let Some(private_key_textarea) =
+                                    self.private_key_textarea.as_mut()
+                                {
+                                    private_key_textarea.input(input);
+                                }
+                            }
+                        },
+                    }
+                    None
+                }
+
+                fn render(
+                    &mut self,
+                    r: &ratatui::prelude::Rect,
+                    f: &mut ratatui::prelude::Frame,
+                    focus: bool,
+                ) {
+                    self.start_amount_textarea.set_block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Start Amount ")
+                            .title_alignment(Alignment::Left),
+                    );
+                    self.start_amount_textarea
+                        .set_style(Style::default().fg(ratatui::style::Color::White));
+                    self.start_amount_textarea.set_style(Style::default());
+                    self.start_amount_textarea
+                        .set_placeholder_style(Style::default().dark_gray());
+
+                    self.duration_textarea.set_block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(" Duration ")
+                            .title_alignment(Alignment::Left),
+                    );
+                    self.duration_textarea
+                        .set_style(Style::default().fg(ratatui::style::Color::White));
+                    self.duration_textarea.set_style(Style::default());
+                    self.duration_textarea
+                        .set_placeholder_style(Style::default().dark_gray());
+
+                    match self.field {
+                        Field::StartAmount
+                            if focus && matches!(self.private_key_textarea, None) =>
+                        {
+                            self.start_amount_textarea
+                                .set_placeholder_style(Style::default().white());
+                            self.start_amount_textarea
+                                .set_style(Style::default().white());
+                            self.start_amount_textarea.set_block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .border_set(border::DOUBLE)
+                                    .title(" Start Amount ".bold())
+                                    .title_alignment(Alignment::Left)
+                                    .style(Style::default().fg(ratatui::style::Color::LightYellow)),
+                            );
+                        }
+                        Field::Duration if focus && matches!(self.private_key_textarea, None) => {
+                            self.duration_textarea
+                                .set_placeholder_style(Style::default().white());
+                            self.duration_textarea.set_style(Style::default().white());
+                            self.duration_textarea.set_block(
+                                Block::default()
+                                    .borders(Borders::ALL)
+                                    .border_set(border::DOUBLE)
+                                    .title(" Duration ".bold())
+                                    .title_alignment(Alignment::Left)
+                                    .style(Style::default().fg(ratatui::style::Color::LightYellow)),
+                            );
+                        }
+                        _ => {}
+                    };
+
+                    let [_, r, _] = Layout::horizontal([
+                        Constraint::Fill(1),
+                        Constraint::Percentage(70),
+                        Constraint::Fill(1),
+                    ])
+                    .areas(*r);
+
+                    let [_, lsa, _, ld, _] = Layout::default()
+                        .direction(ratatui::layout::Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(3),
+                            Constraint::Length(3),
+                            Constraint::Min(2),
+                            Constraint::Length(3),
+                            Constraint::Min(3),
+                        ])
+                        .areas(r);
+
+                    f.render_widget(&self.start_amount_textarea, lsa);
+                    f.render_widget(&self.duration_textarea, ld);
+
+                    if let Some(p) = self.popup.clone() {
+                        render_popup(f, p);
+                    }
+
+                    if let Some(p) = self.private_key_textarea.as_mut() {
+                        if !focus {
+                            p.set_block(private_key_block());
+                        } else {
+                            p.set_block(private_key_block_focus());
+                        }
+                        self.popup = None;
+                        render_private_key_popup(f, &r, &p);
+                    }
+                }
+            }
+        }
+    }
+
+    pub mod bid {
         use blocktion::{
-            blockchain::{
-                hash,
-                transaction::{Data, Transaction},
-            },
+            blockchain::transaction::{Data, Transaction},
             state::service::{
                 Account, AccountExistsRequest, RequestStatus,
                 node_rpc_service_client::NodeRpcServiceClient,
             },
-            time,
         };
         use hex::ToHex;
         use ratatui::{
@@ -777,19 +1286,20 @@ mod dashboard {
         use crate::{
             Section,
             helper::{
-                is_empty, keypair_from_str, lines_to_string, render_popup, render_private_key_popup,
+                is_empty, keypair_from_str, lines_to_string, private_key_block,
+                private_key_block_focus, render_popup, render_private_key_popup,
             },
         };
 
         pub enum Field {
-            StartAmount,
-            Duration,
+            AuctionId,
+            Amount,
             PrivateKey,
         }
 
-        pub struct CreateAuction<'a> {
-            pub start_amount_textarea: TextArea<'a>,
-            pub duration_textarea: TextArea<'a>,
+        pub struct Bid<'a> {
+            pub auction_id_textarea: TextArea<'a>,
+            pub amount_textarea: TextArea<'a>,
             pub private_key_textarea: Option<TextArea<'a>>,
             pub field: Field,
             pub node: String,
@@ -797,81 +1307,65 @@ mod dashboard {
             pub popup: Option<String>,
         }
 
-        impl<'a> CreateAuction<'a> {
+        impl<'a> Bid<'a> {
             pub fn new(node: String, public_key: String) -> Self {
-                let mut start_amount_textarea = TextArea::default();
-                let mut duration_textarea = TextArea::default();
+                let mut amount_textarea = TextArea::default();
+                let mut auction_id_textarea = TextArea::default();
 
-                start_amount_textarea.set_block(
+                amount_textarea.set_block(
                     Block::default()
                         .borders(Borders::ALL)
                         .title(" Start Amount ")
                         .title_alignment(Alignment::Left),
                 );
-                start_amount_textarea.set_cursor_line_style(Style::default());
+                amount_textarea.set_cursor_line_style(Style::default());
 
-                duration_textarea.set_block(
+                auction_id_textarea.set_block(
                     Block::default()
                         .borders(Borders::ALL)
                         .title(" Duration ")
                         .title_alignment(Alignment::Left)
                         .title_bottom(" Click ^Z to cancel. "),
                 );
-                duration_textarea.set_cursor_line_style(Style::default());
+                auction_id_textarea.set_cursor_line_style(Style::default());
 
-                start_amount_textarea.set_placeholder_text(" Insert the amount...");
-                duration_textarea.set_placeholder_text(" Insert the duration in secords...");
+                amount_textarea.set_placeholder_text(" Insert the amount...");
+                auction_id_textarea.set_placeholder_text(" Insert the auction ID...");
 
                 Self {
                     node,
                     public_key,
-                    start_amount_textarea,
-                    duration_textarea,
+                    amount_textarea,
+                    auction_id_textarea,
                     private_key_textarea: None,
-                    field: Field::StartAmount,
+                    field: Field::AuctionId,
                     popup: None,
                 }
             }
 
             fn toggle_up(&mut self) {
                 match self.field {
-                    Field::StartAmount | Field::Duration => self.field = Field::StartAmount,
+                    Field::AuctionId | Field::Amount => self.field = Field::AuctionId,
                     _ => {}
                 };
             }
 
             fn toggle_down(&mut self) {
                 match self.field {
-                    Field::StartAmount | Field::Duration => self.field = Field::Duration,
+                    Field::AuctionId | Field::Amount => self.field = Field::Amount,
                     _ => {}
                 };
-            }
-
-            fn private_key_block_focus() -> Block<'a> {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_set(border::DOUBLE)
-                    .title(" Private Key ".bold())
-                    .title_alignment(Alignment::Left)
-                    .style(Style::default().fg(ratatui::style::Color::LightYellow))
-            }
-
-            fn private_key_block() -> Block<'a> {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Private Key ")
-                    .title_alignment(Alignment::Left)
             }
         }
 
         #[async_trait::async_trait]
-        impl Section for CreateAuction<'_> {
+        impl Section for Bid<'_> {
             fn title(&self) -> String {
-                " Create Auction ".to_string()
+                " Bid ".to_string()
             }
 
             fn top(&self) -> bool {
-                matches!(self.field, Field::StartAmount)
+                matches!(self.field, Field::AuctionId)
             }
 
             fn has_popup(&self) -> bool {
@@ -891,65 +1385,52 @@ mod dashboard {
                             return None;
                         }
 
-                        let start_amount_text = self
-                            .start_amount_textarea
+                        let amount_text = self
+                            .amount_textarea
                             .lines()
                             .iter()
                             .fold(String::new(), |acc, l| [acc, l.clone()].concat());
-                        if is_empty(&start_amount_text) {
-                            self.start_amount_textarea
-                                .set_placeholder_text(" A start amount is required!");
-                            self.start_amount_textarea.clear();
-                            self.field = Field::StartAmount;
+                        if is_empty(&amount_text) {
+                            self.amount_textarea
+                                .set_placeholder_text(" An amount is required!");
+                            self.amount_textarea.cut();
+                            self.field = Field::AuctionId;
                             return None;
                         }
-                        let start_amount;
-                        if let Ok(d) = start_amount_text.parse::<u64>() {
-                            start_amount = d;
+                        let amount;
+                        if let Ok(d) = amount_text.parse::<u64>() {
+                            amount = d;
                         } else {
-                            self.start_amount_textarea
-                                .set_placeholder_text(" The start amount should be an integer!");
-                            self.start_amount_textarea.clear();
-                            self.field = Field::StartAmount;
+                            self.amount_textarea
+                                .set_placeholder_text(" The amount should be an integer!");
+                            self.amount_textarea.cut();
+                            self.field = Field::Amount;
                             return None;
                         }
 
-                        let duration_text = self
-                            .duration_textarea
+                        let auction_id_text = self
+                            .auction_id_textarea
                             .lines()
                             .iter()
                             .fold(String::new(), |acc, l| [acc, l.clone()].concat());
-                        if is_empty(&duration_text) {
-                            self.duration_textarea
-                                .set_placeholder_text(" A duration is required!");
-                            self.field = Field::Duration;
-                            return None;
-                        }
-                        let duration;
-                        if let Ok(d) = duration_text.parse::<u64>() {
-                            duration = d;
-                        } else {
-                            self.start_amount_textarea.set_placeholder_text(
-                                " The duration should be an integer representing seconds!",
-                            );
-                            self.field = Field::Duration;
+                        if is_empty(&auction_id_text) {
+                            self.auction_id_textarea
+                                .set_placeholder_text(" An auction ID is required!");
+                            self.field = Field::AuctionId;
                             return None;
                         }
 
-                        if let Some(private_key_textarea) = self.private_key_textarea.clone() {
-                            fn exit_popup(
-                                create_auction: &mut CreateAuction,
-                                error: Option<String>,
-                            ) {
-                                create_auction.popup = error;
-                                create_auction.field = Field::StartAmount;
-                                create_auction.private_key_textarea = None;
+                        if let Some(private_key_textarea) = self.private_key_textarea.as_mut() {
+                            fn exit_popup(bid: &mut Bid, error: Option<String>) {
+                                bid.popup = error;
+                                bid.field = Field::AuctionId;
+                                bid.private_key_textarea = None;
                             }
 
                             let private_key_text = lines_to_string(private_key_textarea.lines());
 
                             if is_empty(&private_key_text) {
-                                self.duration_textarea
+                                private_key_textarea
                                     .set_placeholder_text(" A private key is required!");
 
                                 exit_popup(&mut self, None);
@@ -976,24 +1457,6 @@ mod dashboard {
                                                 return None;
                                             }
                                         };
-
-                                    let now = match time::now_unix() {
-                                        Ok(t) => t,
-
-                                        _ => {
-                                            exit_popup(
-                                                &mut self,
-                                                Some("Failed to get time.".to_string()),
-                                            );
-
-                                            return None;
-                                        }
-                                    };
-
-                                    let id = hash::encode_hash(&hash::hash(
-                                        Blake2b::new(),
-                                        &format!("{}:{}:{}", start_amount, duration, now),
-                                    ));
 
                                     let nonce = match conn
                                         .account_exists(Request::new(AccountExistsRequest {
@@ -1029,10 +1492,9 @@ mod dashboard {
                                     };
 
                                     let transaction = match Transaction::sign(
-                                        Data::CreateAuction {
-                                            auction_id: id,
-                                            start_amount,
-                                            stop_time: now + duration,
+                                        Data::Bid {
+                                            auction_id: auction_id_text.to_string(),
+                                            amount,
                                         },
                                         &keys.public.encode_hex::<String>(),
                                         nonce,
@@ -1043,8 +1505,10 @@ mod dashboard {
                                         Err(_) => {
                                             exit_popup(
                                                 &mut self,
-                                                Some("Failed to sign the create auction transaction."
-                                                    .to_string()),
+                                                Some(
+                                                    "Failed to sign the bid transaction."
+                                                        .to_string(),
+                                                ),
                                             );
 
                                             return None;
@@ -1057,16 +1521,19 @@ mod dashboard {
                                             let res = res.into_inner();
 
                                             if res.status() == RequestStatus::Successful {
-                                                exit_popup(&mut self, Some(
-                                                    "Successfully created the auction on-chain."
-                                                        .to_string(),
-                                                ));
+                                                exit_popup(
+                                                    &mut self,
+                                                    Some(
+                                                        "Successfully created the bid on-chain."
+                                                            .to_string(),
+                                                    ),
+                                                );
                                                 return None;
                                             } else {
                                                 exit_popup(
                                                     &mut self,
                                                     Some(
-                                                        "Failed to create auction on-chain."
+                                                        "Failed to create bid on-chain."
                                                             .to_string(),
                                                     ),
                                                 );
@@ -1098,7 +1565,7 @@ mod dashboard {
                             private_key_textarea.set_style(Style::default().white());
                             private_key_textarea.set_cursor_line_style(Style::default());
                             private_key_textarea.set_mask_char('\u{2022}');
-                            private_key_textarea.set_block(Self::private_key_block_focus());
+                            private_key_textarea.set_block(private_key_block_focus());
                             private_key_textarea.set_placeholder_text(
                                 " Insert your private key (click ^Z to cancel)...",
                             );
@@ -1114,7 +1581,7 @@ mod dashboard {
                         ..
                     } => {
                         self.private_key_textarea = None;
-                        self.field = Field::StartAmount;
+                        self.field = Field::AuctionId;
                     }
 
                     Input { key: Key::Up, .. } => {
@@ -1130,11 +1597,11 @@ mod dashboard {
                     }
 
                     Input { .. } => match self.field {
-                        Field::Duration => {
-                            self.duration_textarea.input(input);
+                        Field::AuctionId => {
+                            self.auction_id_textarea.input(input);
                         }
-                        Field::StartAmount => {
-                            self.start_amount_textarea.input(input);
+                        Field::Amount => {
+                            self.amount_textarea.input(input);
                         }
                         Field::PrivateKey => {
                             if let Some(private_key_textarea) = self.private_key_textarea.as_mut() {
@@ -1152,54 +1619,53 @@ mod dashboard {
                 f: &mut ratatui::prelude::Frame,
                 focus: bool,
             ) {
-                self.start_amount_textarea.set_block(
+                self.auction_id_textarea.set_block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Start Amount ")
+                        .title(" Auction ID ")
                         .title_alignment(Alignment::Left),
                 );
-                self.start_amount_textarea
+                self.auction_id_textarea
                     .set_style(Style::default().fg(ratatui::style::Color::White));
-                self.start_amount_textarea.set_style(Style::default());
-                self.start_amount_textarea
+                self.auction_id_textarea.set_style(Style::default());
+                self.auction_id_textarea
                     .set_placeholder_style(Style::default().dark_gray());
 
-                self.duration_textarea.set_block(
+                self.amount_textarea.set_block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Duration ")
+                        .title(" Amount ")
                         .title_alignment(Alignment::Left),
                 );
-                self.duration_textarea
+                self.amount_textarea
                     .set_style(Style::default().fg(ratatui::style::Color::White));
-                self.duration_textarea.set_style(Style::default());
-                self.duration_textarea
+                self.amount_textarea.set_style(Style::default());
+                self.amount_textarea
                     .set_placeholder_style(Style::default().dark_gray());
 
                 match self.field {
-                    Field::StartAmount if focus && matches!(self.private_key_textarea, None) => {
-                        self.start_amount_textarea
+                    Field::AuctionId if focus && matches!(self.private_key_textarea, None) => {
+                        self.auction_id_textarea
                             .set_placeholder_style(Style::default().white());
-                        self.start_amount_textarea
-                            .set_style(Style::default().white());
-                        self.start_amount_textarea.set_block(
+                        self.auction_id_textarea.set_style(Style::default().white());
+                        self.auction_id_textarea.set_block(
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_set(border::DOUBLE)
-                                .title(" Start Amount ".bold())
+                                .title(" Auction ID ".bold())
                                 .title_alignment(Alignment::Left)
                                 .style(Style::default().fg(ratatui::style::Color::LightYellow)),
                         );
                     }
-                    Field::Duration if focus && matches!(self.private_key_textarea, None) => {
-                        self.duration_textarea
+                    Field::Amount if focus && matches!(self.private_key_textarea, None) => {
+                        self.amount_textarea
                             .set_placeholder_style(Style::default().white());
-                        self.duration_textarea.set_style(Style::default().white());
-                        self.duration_textarea.set_block(
+                        self.amount_textarea.set_style(Style::default().white());
+                        self.amount_textarea.set_block(
                             Block::default()
                                 .borders(Borders::ALL)
                                 .border_set(border::DOUBLE)
-                                .title(" Duration ".bold())
+                                .title(" Amount ".bold())
                                 .title_alignment(Alignment::Left)
                                 .style(Style::default().fg(ratatui::style::Color::LightYellow)),
                         );
@@ -1225,8 +1691,8 @@ mod dashboard {
                     ])
                     .areas(r);
 
-                f.render_widget(&self.start_amount_textarea, lsa);
-                f.render_widget(&self.duration_textarea, ld);
+                f.render_widget(&self.auction_id_textarea, lsa);
+                f.render_widget(&self.amount_textarea, ld);
 
                 if let Some(p) = self.popup.clone() {
                     render_popup(f, p);
@@ -1234,9 +1700,9 @@ mod dashboard {
 
                 if let Some(p) = self.private_key_textarea.as_mut() {
                     if !focus {
-                        p.set_block(Self::private_key_block());
+                        p.set_block(private_key_block());
                     } else {
-                        p.set_block(Self::private_key_block_focus());
+                        p.set_block(private_key_block_focus());
                     }
                     self.popup = None;
                     render_private_key_popup(f, &r, &p);
@@ -1245,6 +1711,7 @@ mod dashboard {
         }
     }
 
+    #[derive(Clone)]
     pub enum Area {
         Menu,
         List,
@@ -1256,23 +1723,44 @@ mod dashboard {
         page: Page,
         area: Area,
         options_state: ListState,
-        option: Box<dyn Section>,
+        options: HashMap<(Page, usize), Box<dyn Section>>,
     }
 
     impl Dashboard {
         pub fn new(node: &str, public_key: &str) -> Self {
             let mut options_state = ListState::default();
-            options_state.select_first();
+            options_state.select(Some(1));
 
-            let mut menu_state = ListState::default();
-            menu_state.select_first();
+            let mut options: HashMap<(Page, usize), Box<dyn Section>> = HashMap::new();
+
+            options.insert(
+                (Page::Auctions, 1),
+                Box::new(CreateAuction::new(node.to_string(), public_key.to_string())),
+            );
+            options.insert(
+                (Page::Auctions, 2),
+                Box::new(Bid::new(node.to_string(), public_key.to_string())),
+            );
 
             Self {
                 public_key: public_key.to_string(),
                 page: Page::Auctions,
                 area: Area::Menu,
                 options_state,
-                option: Box::new(CreateAuction::new(node.to_string(), public_key.to_string())),
+                options,
+            }
+        }
+
+        pub fn option(&mut self) -> &mut Box<dyn Section> {
+            match self.options.get_mut(&(
+                self.page.clone(),
+                match self.options_state.selected() {
+                    Some(s) => s,
+                    _ => unreachable!(),
+                },
+            )) {
+                Some(o) => o,
+                _ => unreachable!(),
             }
         }
     }
@@ -1286,7 +1774,7 @@ mod dashboard {
                     ctrl: true,
                     ..
                 } => {
-                    if !self.option.has_popup() {
+                    if !self.option().has_popup() {
                         match self.area {
                             Area::List => self.area = Area::Body,
                             Area::Body => self.area = Area::Menu,
@@ -1300,8 +1788,8 @@ mod dashboard {
                 } => match self.area {
                     Area::Menu => self.page = self.page.next(),
                     Area::Body => {
-                        if let Some(s) = self.option.handle_io(input).await {
-                            self.option = s;
+                        if let Some(s) = self.option().handle_io(input).await {
+                            *self.option() = s;
                         }
                     }
                     _ => {}
@@ -1310,8 +1798,8 @@ mod dashboard {
                 Input { key: Key::Left, .. } => match self.area {
                     Area::Menu => self.page = self.page.previous(),
                     Area::Body => {
-                        if let Some(s) = self.option.handle_io(input).await {
-                            self.option = s;
+                        if let Some(s) = self.option().handle_io(input).await {
+                            *self.option() = s;
                         }
                     }
                     _ => {}
@@ -1320,8 +1808,8 @@ mod dashboard {
                 Input { key: Key::Down, .. } => match self.area {
                     Area::List => self.options_state.select_next(),
                     Area::Body => {
-                        if let Some(s) = self.option.handle_io(input).await {
-                            self.option = s;
+                        if let Some(s) = self.option().handle_io(input).await {
+                            *self.option() = s;
                         }
                     }
                     _ => {}
@@ -1330,16 +1818,16 @@ mod dashboard {
                 Input { key: Key::Up, .. } => match self.area {
                     Area::List => self.options_state.select_previous(),
                     Area::Body => {
-                        if let Some(s) = self.option.handle_io(input).await {
-                            self.option = s;
+                        if let Some(s) = self.option().handle_io(input).await {
+                            *self.option() = s;
                         }
                     }
                     _ => {}
                 },
                 _ => {
                     if let Area::Body = self.area {
-                        if let Some(s) = self.option.handle_io(input).await {
-                            self.option = s;
+                        if let Some(s) = self.option().handle_io(input).await {
+                            *self.option() = s;
                         }
                     }
                 }
@@ -1408,14 +1896,16 @@ mod dashboard {
 
             let page = match self.area {
                 Area::Body => Block::bordered()
-                    .title(self.option.title().bold())
+                    .title(self.option().title().bold())
                     .border_style(Style::default().light_yellow()),
-                _ => Block::bordered().title(self.option.title()),
+                _ => Block::bordered().title(self.option().title()),
             };
             f.render_widget(page, body_layout);
 
-            self.option
-                .render(&body_layout, f, matches!(self.area, Area::Body));
+            let area = self.area.clone();
+
+            self.option()
+                .render(&body_layout, f, matches!(area, Area::Body));
         }
     }
 }
