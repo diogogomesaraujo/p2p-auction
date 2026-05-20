@@ -170,6 +170,10 @@ impl Runtime {
             Ok(_) => {
                 tracing::info!("Accepted block: {:?}", block);
 
+                {
+                    self.state.write().await.last_block_accepted = Some(std::time::Instant::now());
+                }
+
                 if rebroadcast {
                     self.swarm
                         .behaviour_mut()

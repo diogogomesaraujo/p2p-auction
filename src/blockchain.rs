@@ -225,6 +225,7 @@ pub mod transaction {
             ed25519::{signature_to_string, string_to_public_key, string_to_signature},
             hash::{self, Hashable},
         },
+        config::MAX_TRANSACTION_POOL_SIZE,
         state::{
             self,
             service::{TransactionRequest, transaction_request},
@@ -503,6 +504,19 @@ pub mod transaction {
             &mut self,
             transaction: Transaction,
         ) -> Result<(), Box<dyn Error + Send + Sync>> {
+            if self.0.len() >= MAX_TRANSACTION_POOL_SIZE {
+                // evict the oldest (lowest timestamp) pending transaction
+                // probably needs changing since if we can't compute a block we
+                // discard transaction
+                if let Some(oldest_id) = self
+                    .0
+                    .values()
+                    .min_by_key(|t| (t.timestamp, t.id.clone()))
+                    .map(|t| t.id.clone())
+                {
+                    self.0.remove(&oldest_id);
+                }
+            }
             self.0.insert(transaction.id.clone(), transaction);
             Ok(())
         }

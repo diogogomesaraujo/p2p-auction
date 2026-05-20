@@ -1,6 +1,7 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
 use crate::blockchain::{Blockchain, WorldState};
+use crate::config::MIN_TX_INTERVAL;
 use crate::state::service::{
     AccountExistsRequest, AuctionExistsRequest, AuctionExistsResponse, StopAuction,
 };
@@ -16,6 +17,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tonic::transport::Server;
@@ -28,6 +30,8 @@ pub struct State {
     pub blockchain: Blockchain,
     pub received_blocks: HashMap<String, Block>,
     pub notifiers: HashMap<String, Arc<(Notify, AtomicBool)>>,
+    pub last_tx_per_sender: HashMap<String, Instant>,
+    pub last_block_accepted: Option<Instant>,
 }
 
 impl State {
@@ -37,6 +41,8 @@ impl State {
             blockchain: Blockchain::new(u32::MAX)?,
             received_blocks: HashMap::new(),
             notifiers: HashMap::new(),
+            last_tx_per_sender: HashMap::new(),
+            last_block_accepted: None,
         })
     }
 }
@@ -161,6 +167,19 @@ impl NodeRpcService for Arc<RwLock<State>> {
                 }
             }
         };
+
+        {
+            let mut state = self.write().await;
+            let now = Instant::now();
+            if let Some(last) = state.last_tx_per_sender.get(&transaction.from) {
+                if now.duration_since(*last) < MIN_TX_INTERVAL {
+                    return Ok(Response::new(TransactionResponse { status: 1 }));
+                }
+            }
+            state
+                .last_tx_per_sender
+                .insert(transaction.from.clone(), now);
+        }
 
         info!(
             "Adding transaction {:?} to the blockchain's transaction pool.",

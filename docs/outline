@@ -1,0 +1,17 @@
+client -> publishes transactions
+node -> mines proposes and validades blocks. stores blockchain. informs clients about current state of blockchain.
+
+kad for peer discovery and bootstrap logic (boot, find_node )
+gossip to propagate blocks through the network (publish a block)
+request response for direct node to node communication (longest chain of hashes, missing blocks)
+grpc for client requests to node (transactions)
+identify for message signing and identity
+
+blockchain: implemented from scratch
+PoW based -> elaborate how it works
+verifications we are doing
+basis of assurance
+ threats → mitigations.
+
+
+Protocol specifications (messages, state machines, invariants).

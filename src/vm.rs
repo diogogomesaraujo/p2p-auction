@@ -4,6 +4,7 @@ use crate::{
         block::Block,
         transaction::{Data, Transaction},
     },
+    config::REQUEST_LONGEST_CHAIN_AFTER,
     runtime::Runtime,
     state::{Runnable, State},
     topic::BLOCKS,
@@ -111,6 +112,8 @@ pub trait VirtualMachine {
         // mine block thread
 
         let (tx, mut rx) = mpsc::unbounded_channel::<Block>();
+        let (sync_tx, mut sync_rx) = mpsc::unbounded_channel::<()>();
+
         let tx = Arc::new(RwLock::new(tx));
         {
             let tx = tx.clone();
@@ -140,6 +143,29 @@ pub trait VirtualMachine {
                     }
 
                     sleep(NEW_BLOCK_SPEED).await;
+                }
+            });
+        }
+
+        // After an arbitrary amount of time of not receiving blocks through gossip
+        // ask a peer for longest hash chain. This protects against hostile gossip environments
+        // and avoids stalling and thinking the blockchain is idle.
+        {
+            let state = runtime.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    sleep(REQUEST_LONGEST_CHAIN_AFTER).await;
+                    let stale = {
+                        let s = state.read().await;
+                        match s.last_block_accepted {
+                            Some(t) => t.elapsed() >= REQUEST_LONGEST_CHAIN_AFTER,
+                            None => true,
+                        }
+                    };
+                    if stale {
+                        tracing::warn!("No block accepted recently — requesting longest chain.");
+                        let _ = sync_tx.send(());
+                    }
                 }
             });
         }
@@ -185,6 +211,16 @@ pub trait VirtualMachine {
                             tracing::error!("Couldn't publish block: {e}");
                             sleep(Duration::from_secs(1)).await;
                             tx.write().await.send(block)?;
+                    }
+                }
+
+                Some(_) = sync_rx.recv() => {
+                    let peers: Vec<_> = runtime.swarm.connected_peers().copied().collect();
+                    if let Some(peer) = peers.first() {
+                        runtime.swarm
+                            .behaviour_mut()
+                            .request_response
+                            .send_request(peer, crate::behaviour::Request::LongestChainHashes);
                     }
                 }
             }

@@ -10,9 +10,14 @@ pub mod time;
 pub mod vm;
 
 pub mod config {
+    use std::time::Duration;
+
     pub const CONFIG_DIR: &str = "config";
     pub const QUORUM: usize = 3;
     pub const LOOKUP_QUORUM: u16 = 1;
+    pub const MIN_TX_INTERVAL: Duration = Duration::from_secs(1);
+    pub const REQUEST_LONGEST_CHAIN_AFTER: Duration = Duration::from_secs(30); // defend against hostile gossip (Eclipse)
+    pub const MAX_TRANSACTION_POOL_SIZE: usize = 10_000;
 }
 
 pub mod topic {
