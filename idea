@@ -11,5 +11,7 @@ AuctionSpamBot
 AccountSpamBot
 MalformedTransactionBot
 
-trait bot? use bots as attack vectors
-increment transaction nonce upon commit
+replay logic is still shit. implement future max like etherium.
+implement detection in memqueue
+adapt propose_block and accept_block
+prune as early as detected as to avoid persistence of replay transactions

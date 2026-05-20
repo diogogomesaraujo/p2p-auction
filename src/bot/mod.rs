@@ -12,7 +12,17 @@ use rand::{RngCore, thread_rng};
 use tokio::time::sleep;
 use tonic::{Request, transport::Channel};
 
+pub mod byzantine;
+pub mod double_spend;
+pub mod eclipse;
+pub mod flood;
+pub mod forge;
 pub mod honest;
+pub mod nonce_skip;
+pub mod overbid;
+pub mod past_auction;
+pub mod replay;
+pub mod sybil;
 
 #[async_trait]
 pub trait Bot {

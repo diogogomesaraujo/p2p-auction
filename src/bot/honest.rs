@@ -15,7 +15,7 @@ pub struct HonestBot {
 #[async_trait]
 impl Bot for HonestBot {
     fn name(&self) -> &'static str {
-        "honest-auction-bot"
+        "honest-bot"
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {

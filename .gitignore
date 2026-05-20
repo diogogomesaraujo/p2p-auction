@@ -10,3 +10,4 @@ local.json/
 test
 analysis/
 fixes
+src/bin/app.rs
