@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_rejection},
     time::now_unix_plus,
 };
 use async_trait::async_trait;
@@ -33,7 +33,8 @@ impl Bot for ByzantineBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -42,9 +43,11 @@ impl Bot for ByzantineBot {
             start_amount: 100,
             stop_time: now_unix_plus(Duration::from_secs(60))?,
         };
+
         let mut tx = Transaction::sign(data, &self.ctx.public_key, self.ctx.nonce, &self.ctx.keys)?;
 
         let corrupt = OsRng.r#gen::<f32>() < self.corruption_rate;
+
         if corrupt {
             let mut s = tx.signature.clone();
             let first = s.remove(0);
@@ -54,13 +57,14 @@ impl Bot for ByzantineBot {
             };
             s.insert(0, flipped);
             tx.signature = s;
-        }
 
-        let _ = self.ctx.client.transaction(Request::new(tx.into())).await;
-
-        if !corrupt {
+            let result = self.ctx.client.transaction(Request::new(tx.into())).await;
+            expected_rejection(result, "corrupted-signature transaction")?;
+        } else {
+            self.ctx.client.transaction(Request::new(tx.into())).await?;
             self.ctx.nonce += 1;
         }
+
         Ok(())
     }
 }

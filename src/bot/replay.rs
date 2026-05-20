@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_rejection},
 };
 use async_trait::async_trait;
 use tonic::Request;
@@ -14,6 +14,7 @@ pub struct ReplayBot {
     pub ctx: Context,
     cached: Option<Transaction>, // The single signed transaction we will replay forever.
     auction_id: String,          // Auction id used by the replayed bid.
+    submitted_once: bool,
 }
 
 impl ReplayBot {
@@ -22,6 +23,7 @@ impl ReplayBot {
             ctx,
             cached: None,
             auction_id: "replay-target".to_string(),
+            submitted_once: false,
         }
     }
 }
@@ -39,8 +41,10 @@ impl Bot for ReplayBot {
             auction_id: self.auction_id.clone(),
             amount: 500,
         };
+
         let tx = Transaction::sign(data, &self.ctx.public_key, self.ctx.nonce, &self.ctx.keys)?;
         self.cached = Some(tx);
+
         Ok(())
     }
 
@@ -50,7 +54,18 @@ impl Bot for ReplayBot {
             None => return Err("ReplayBot not initialised".into()),
         };
 
-        let _ = self.ctx.client.transaction(Request::new(tx.into())).await;
+        let result = self.ctx.client.transaction(Request::new(tx.into())).await;
+
+        if self.submitted_once {
+            expected_rejection(result, "replayed transaction")?;
+            println!("{} rejected replay as expected", self.name());
+        } else {
+            result?;
+            println!("{} submitted original transaction", self.name());
+            self.submitted_once = true;
+            self.ctx.nonce += 1;
+        }
+
         Ok(())
     }
 }

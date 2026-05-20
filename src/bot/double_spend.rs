@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_rejection},
 };
 use async_trait::async_trait;
 use tonic::Request;
@@ -26,35 +26,42 @@ impl Bot for DoubleSpendBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let n = self.ctx.nonce;
 
         let a = Transaction::sign(
-            Data::Bid {
+            Data::CreateAuction {
                 auction_id: "ds-a".to_string(),
-                amount: 1_000,
-            },
-            &self.ctx.public_key,
-            n,
-            &self.ctx.keys,
-        )?;
-        let b = Transaction::sign(
-            Data::Bid {
-                auction_id: "ds-b".to_string(),
-                amount: 1_000,
+                start_amount: 1_000,
+                stop_time: u64::MAX,
             },
             &self.ctx.public_key,
             n,
             &self.ctx.keys,
         )?;
 
-        let _ = self.ctx.client.transaction(Request::new(a.into())).await;
-        let _ = self.ctx.client.transaction(Request::new(b.into())).await;
+        let b = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "ds-b".to_string(),
+                start_amount: 1_000,
+                stop_time: u64::MAX,
+            },
+            &self.ctx.public_key,
+            n,
+            &self.ctx.keys,
+        )?;
+
+        self.ctx.client.transaction(Request::new(a.into())).await?;
+
+        let second = self.ctx.client.transaction(Request::new(b.into())).await;
+        expected_rejection(second, "double-spend transaction")?;
 
         self.ctx.nonce += 1;
+
         Ok(())
     }
 }

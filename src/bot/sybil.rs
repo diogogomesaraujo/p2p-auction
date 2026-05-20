@@ -39,6 +39,8 @@ impl Bot for SybilBot {
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut accepted_identities = 0;
+
         for _ in 0..self.identities_per_step {
             let keys = Keypair::generate(&mut OsRng);
             let public_key: String = keys.public.encode_hex();
@@ -47,19 +49,29 @@ impl Bot for SybilBot {
             let original_keys = std::mem::replace(&mut self.ctx.keys, keys);
             let original_nonce = std::mem::replace(&mut self.ctx.nonce, 0);
 
-            let _ = self.ctx.create_account().await;
-            let _ = self
-                .ctx
-                .send(Data::Bid {
-                    auction_id: self.auction_id.clone(),
-                    amount: 100,
-                })
-                .await;
+            let create_result = self.ctx.create_account().await;
+
+            if create_result.is_ok() {
+                accepted_identities += 1;
+
+                let _ = self
+                    .ctx
+                    .send(Data::Bid {
+                        auction_id: self.auction_id.clone(),
+                        amount: 100,
+                    })
+                    .await;
+            }
 
             self.ctx.public_key = original_pk;
             self.ctx.keys = original_keys;
             self.ctx.nonce = original_nonce;
         }
+
+        if accepted_identities == 0 {
+            return Err("sybil bot generated no accepted identities.".into());
+        }
+
         Ok(())
     }
 }

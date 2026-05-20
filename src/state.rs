@@ -143,8 +143,15 @@ impl NodeRpcService for Arc<RwLock<State>> {
             .insert(tid.clone(), notify.clone());
 
         match self.write().await.blockchain.add_transaction(transaction) {
-            Ok(_) => {}
-            _ => return Ok(Response::new(TransactionResponse { status: 1 })),
+            Ok(_) => {
+                self.write()
+                    .await
+                    .notifiers
+                    .insert(tid.clone(), notify.clone());
+            }
+            Err(e) => {
+                return Err(tonic::Status::invalid_argument(e.to_string()));
+            }
         };
 
         notify.0.notified().await;

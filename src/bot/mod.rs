@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    state::service::node_rpc_service_client::NodeRpcServiceClient,
+    state::service::{TransactionResponse, node_rpc_service_client::NodeRpcServiceClient},
     time::Poisson,
 };
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use ed25519_dalek_blake2b::Keypair;
 use hex::ToHex;
 use rand::{RngCore, thread_rng};
 use tokio::time::sleep;
-use tonic::{Request, transport::Channel};
+use tonic::{Request, Response, Status, transport::Channel};
 
 pub mod byzantine;
 pub mod double_spend;
@@ -56,17 +56,20 @@ impl Context {
         })
     }
 
-    pub async fn send(&mut self, data: Data) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let tx = Transaction::sign(data, &self.public_key, self.nonce, &self.keys)?;
+    pub async fn send(&mut self, data: Data) -> Result<Response<TransactionResponse>, Status> {
+        let tx = Transaction::sign(data, &self.public_key, self.nonce, &self.keys)
+            .map_err(|e| Status::internal(e.to_string()))?;
 
-        self.client.transaction(Request::new(tx.into())).await?;
+        let response = self.client.transaction(Request::new(tx.into())).await?;
 
-        self.nonce += 1;
+        if response.get_ref().status == 0 {
+            self.nonce += 1;
+        }
 
-        Ok(())
+        Ok(response)
     }
 
-    pub async fn create_account(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+    pub async fn create_account(&mut self) -> Result<Response<TransactionResponse>, Status> {
         self.send(Data::CreateUserAccount {
             public_key: self.public_key.clone(),
         })
@@ -93,7 +96,7 @@ pub async fn run_bot<B: Bot + Send>(
 
         match bot.step().await {
             Ok(_) => {
-                println!("{} generated {}/{} requests", bot.name(), i + 1, iterations);
+                println!("{} completed step {}/{}", bot.name(), i + 1, iterations);
             }
             Err(e) => {
                 eprintln!("{} failed on step {}: {}", bot.name(), i + 1, e);
@@ -102,4 +105,20 @@ pub async fn run_bot<B: Bot + Send>(
     }
 
     Ok(())
+}
+
+pub fn expected_rejection(
+    result: Result<Response<TransactionResponse>, Status>,
+    attack: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    match result {
+        Err(_) => Ok(()),
+        Ok(response) => {
+            if response.into_inner().status == 1 {
+                Ok(())
+            } else {
+                Err(format!("{attack} was accepted but should have been rejected.").into())
+            }
+        }
+    }
 }

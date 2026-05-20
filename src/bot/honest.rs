@@ -19,7 +19,8 @@ impl Bot for HonestBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {

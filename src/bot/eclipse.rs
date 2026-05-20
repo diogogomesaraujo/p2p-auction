@@ -39,6 +39,8 @@ impl Bot for EclipseBot {
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut accepted = 0;
+
         for _ in 0..self.burst {
             let keys = Keypair::generate(&mut OsRng);
             let public_key: String = keys.public.encode_hex();
@@ -47,17 +49,28 @@ impl Bot for EclipseBot {
             let original_keys = std::mem::replace(&mut self.ctx.keys, keys);
             let original_nonce = std::mem::replace(&mut self.ctx.nonce, 0);
 
-            let _ = self
+            let result = self
                 .ctx
                 .send(Data::CreateUserAccount {
                     public_key: self.ctx.public_key.clone(),
                 })
                 .await;
 
+            if result.is_ok() {
+                accepted += 1;
+            }
+
             self.ctx.public_key = original_pk;
             self.ctx.keys = original_keys;
             self.ctx.nonce = original_nonce;
         }
+
+        if accepted == 0 {
+            return Err(
+                "eclipse/account-flood bot generated no accepted account transactions.".into(),
+            );
+        }
+
         Ok(())
     }
 }

@@ -987,6 +987,10 @@ impl Blockchain {
             return Err("Transaction already recorded.".into());
         }
 
+        if self.transaction_pool.contains(&transaction) {
+            return Err("Transaction already pending.".into());
+        }
+
         match &transaction.record {
             Data::CreateUserAccount { public_key } => {
                 if transaction.from != *public_key {
@@ -1728,7 +1732,7 @@ pub mod test {
 
     /// Tests that transactions with malformed or invalid signatures are rejected from the transaction pool.
     #[test]
-    fn test_attack_invalid_signature_rejected_from_mempool()
+    fn test_blockchain_propose_block_fails_with_empty_transaction_pool()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
 
@@ -1870,6 +1874,94 @@ pub mod test {
 
         chain.accept_block(block.clone(), &HashMap::new())?;
         assert!(chain.accept_block(block, &HashMap::new()).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_attack_duplicate_account_creation_rejected() -> Result<(), Box<dyn Error + Send + Sync>>
+    {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k = generate_keypair();
+        let pk = public_key_to_string(&k.public);
+
+        mine_create_account(&mut chain, &k)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert!(chain.get_account(&pk).is_some());
+
+        let duplicate = signed_create_account_tx(&k, 0)?;
+        assert!(chain.add_transaction(duplicate).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that a transaction with a future nonce can enter a block,
+    /// but is not executed until the account nonce matches.
+    #[test]
+    fn test_attack_future_nonce_transaction_does_not_execute()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert_eq!(chain.get_account(&user_pk).unwrap().nonce, 1);
+
+        let future_tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "future-nonce-auction".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            100,
+            &user,
+        )?;
+
+        chain.transaction_pool.add_transaction(future_tx)?;
+        chain.propose_block(&user_pk, &HashMap::new())?;
+
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert_eq!(chain.get_account(&user_pk).unwrap().nonce, 1);
+
+        Ok(())
+    }
+
+    /// Tests that replaying the same transaction while it is still pending is rejected.
+    #[test]
+    fn test_attack_duplicate_pending_transaction_rejected()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        let tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "pending-replay".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            1,
+            &user,
+        )?;
+
+        chain.add_transaction(tx.clone())?;
+        assert!(chain.add_transaction(tx).is_err());
 
         Ok(())
     }

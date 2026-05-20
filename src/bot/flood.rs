@@ -31,19 +31,31 @@ impl Bot for FloodBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut accepted = 0;
+
         for _ in 0..self.burst_ammount {
-            let _ = self
+            let result = self
                 .ctx
                 .send(Data::Bid {
                     auction_id: "flood-target".to_string(),
                     amount: 1,
                 })
                 .await;
+
+            if result.is_ok() {
+                accepted += 1;
+            }
         }
+
+        if accepted == 0 {
+            return Err("flood bot generated no accepted transactions.".into());
+        }
+
         Ok(())
     }
 }

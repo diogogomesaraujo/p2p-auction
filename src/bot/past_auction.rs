@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     blockchain::transaction::Data,
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_rejection},
 };
 use async_trait::async_trait;
 use rand::{Rng, rngs::OsRng};
@@ -29,17 +29,19 @@ impl Bot for PastAuctionBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let auction_id = OsRng.r#gen::<u32>().to_string();
+
         let past_stop = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(d) => d.as_secs().saturating_sub(3600),
             Err(_) => 0,
         };
 
-        let _ = self
+        let create_result = self
             .ctx
             .send(Data::CreateAuction {
                 auction_id: auction_id.clone(),
@@ -48,13 +50,18 @@ impl Bot for PastAuctionBot {
             })
             .await;
 
-        let _ = self
+        expected_rejection(create_result, "past auction creation")?;
+
+        let bid_result = self
             .ctx
             .send(Data::Bid {
                 auction_id,
                 amount: 50,
             })
             .await;
+
+        expected_rejection(bid_result, "bid on past auction")?;
+
         Ok(())
     }
 }

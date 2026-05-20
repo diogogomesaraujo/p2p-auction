@@ -31,7 +31,8 @@ impl Bot for NonceSkipBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -47,7 +48,13 @@ impl Bot for NonceSkipBot {
             bogus_nonce,
             &self.ctx.keys,
         )?;
-        let _ = self.ctx.client.transaction(Request::new(tx.into())).await;
+
+        let result = self.ctx.client.transaction(Request::new(tx.into())).await;
+
+        if result.is_ok() {
+            return Err("future nonce transaction was accepted immediately; verify it does not execute later.".into());
+        }
+
         Ok(())
     }
 }

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_rejection},
 };
 use async_trait::async_trait;
 use ed25519_dalek_blake2b::Keypair;
@@ -36,7 +36,8 @@ impl Bot for ForgeBot {
     }
 
     async fn init(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.ctx.create_account().await
+        self.ctx.create_account().await?;
+        Ok(())
     }
 
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -44,10 +45,13 @@ impl Bot for ForgeBot {
             auction_id: "forge-target".to_string(),
             amount: 9_999,
         };
+
         let mut tx = Transaction::sign(data, &self.ctx.public_key, self.ctx.nonce, &self.ctx.keys)?;
         tx.from = self.victim_pk.clone();
 
-        let _ = self.ctx.client.transaction(Request::new(tx.into())).await;
+        let result = self.ctx.client.transaction(Request::new(tx.into())).await;
+        expected_rejection(result, "forged sender transaction")?;
+
         Ok(())
     }
 }
