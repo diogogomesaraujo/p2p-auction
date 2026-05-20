@@ -28,7 +28,7 @@ use tokio::sync::Notify;
 use tracing::info;
 
 /// Constant that defines the number of blocks that need to be appended before a block's transactions can be executed.
-const EXECUTE_AFTER_N_BLOCKS: usize = 2;
+pub const EXECUTE_AFTER_N_BLOCKS: usize = 2;
 
 /// Type that defines the hash-function chosen to compute the hashes that will form the blockchain.
 ///
@@ -1129,7 +1129,12 @@ impl WorldState for Blockchain {
     }
 
     fn get_block_from_hash(&self, hash: &str) -> Option<&Block> {
-        if self.longest_chain.contains(&hash.to_string()) {
+        if self.longest_chain[0..(self
+            .longest_chain
+            .len()
+            .saturating_sub(EXECUTE_AFTER_N_BLOCKS))]
+            .contains(&hash.to_string())
+        {
             self.blocks.get(hash)
         } else {
             None
@@ -1137,8 +1142,10 @@ impl WorldState for Blockchain {
     }
 
     fn get_next_block_hash_from_hash(&self, hash: &str) -> Option<&String> {
-        if let Some(i) = self
+        if let Some(i) = self.longest_chain[0..(self
             .longest_chain
+            .len()
+            .saturating_sub(EXECUTE_AFTER_N_BLOCKS))]
             .iter()
             .enumerate()
             .fold(None, |acc, (i, h)| {

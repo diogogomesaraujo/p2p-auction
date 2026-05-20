@@ -47,6 +47,8 @@ message AuctionExistsRequest {
   string auction_id = 1;
 }
 
+message FirstBlockHashRequest {}
+
 // Response Types
 
 enum RequestStatus {
@@ -98,9 +100,14 @@ message AuctionExistsResponse {
   optional string block_hash = 3;
 }
 
+message FirstBlockHashResponse {
+  optional string hash = 1;
+}
+
 service NodeRpcService {
   rpc Transaction(TransactionRequest) returns (TransactionResponse);
   rpc BlockInfo(BlockInfoRequest) returns (BlockInfoResponse);
   rpc AccountExists(AccountExistsRequest) returns (AccountExistsResponse);
   rpc AuctionExists(AuctionExistsRequest) returns (AuctionExistsResponse);
+  rpc FirstBlockHash(FirstBlockHashRequest) returns (FirstBlockHashResponse);
 }

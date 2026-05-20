@@ -1805,6 +1805,16 @@ mod dashboard {
         }
     }
 
+    pub mod available_auctions {
+        use ratatui::widgets::TableState;
+
+        pub struct AvailableAuctions {
+            pub table_state: TableState,
+            pub node: String,
+            pub popup: Option<String>,
+        }
+    }
+
     #[derive(Clone)]
     pub enum Area {
         Menu,
