@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_reject},
 };
 use async_trait::async_trait;
 use ed25519_dalek_blake2b::Keypair;
@@ -50,7 +50,7 @@ impl Bot for ForgeBot {
         tx.from = self.victim_pk.clone();
 
         let result = self.ctx.client.transaction(Request::new(tx.into())).await;
-        expected_rejection(result, "forged sender transaction")?;
+        expected_reject(result, self.name(), "forged sender transaction")?;
 
         Ok(())
     }

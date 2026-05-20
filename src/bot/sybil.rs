@@ -51,7 +51,10 @@ impl Bot for SybilBot {
 
             let create_result = self.ctx.create_account().await;
 
-            if create_result.is_ok() {
+            if create_result
+                .as_ref()
+                .is_ok_and(|r| r.get_ref().status == 0)
+            {
                 accepted_identities += 1;
 
                 let _ = self

@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_accept, expected_reject},
 };
 use async_trait::async_trait;
 use tonic::Request;
@@ -55,10 +55,11 @@ impl Bot for DoubleSpendBot {
             &self.ctx.keys,
         )?;
 
-        self.ctx.client.transaction(Request::new(a.into())).await?;
+        let first = self.ctx.client.transaction(Request::new(a.into())).await;
+        expected_accept(first, self.name(), "first double-spend transaction")?;
 
         let second = self.ctx.client.transaction(Request::new(b.into())).await;
-        expected_rejection(second, "double-spend transaction")?;
+        expected_reject(second, self.name(), "double-spend transaction")?;
 
         self.ctx.nonce += 1;
 

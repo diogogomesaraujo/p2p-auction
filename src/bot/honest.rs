@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use crate::{
     blockchain::transaction::Data,
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_accept},
     time::now_unix_plus,
 };
 use async_trait::async_trait;
@@ -26,20 +26,24 @@ impl Bot for HonestBot {
     async fn step(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         let auction_id = OsRng.next_u32().to_string();
 
-        self.ctx
+        let create_result = self
+            .ctx
             .send(Data::CreateAuction {
                 auction_id: auction_id.clone(),
                 start_amount: OsRng.next_u64(),
                 stop_time: now_unix_plus(Duration::from_secs(60))?,
             })
-            .await?;
+            .await;
+        expected_accept(create_result, self.name(), "create auction")?;
 
-        self.ctx
+        let bid_result = self
+            .ctx
             .send(Data::Bid {
                 auction_id,
                 amount: 10_000,
             })
-            .await?;
+            .await;
+        expected_accept(bid_result, self.name(), "bid")?;
 
         Ok(())
     }

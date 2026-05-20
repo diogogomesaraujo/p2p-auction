@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context},
+    bot::{Bot, Context, expected_reject},
 };
 use async_trait::async_trait;
 use tonic::Request;
@@ -51,9 +51,7 @@ impl Bot for NonceSkipBot {
 
         let result = self.ctx.client.transaction(Request::new(tx.into())).await;
 
-        if result.is_ok() {
-            return Err("future nonce transaction was accepted immediately; verify it does not execute later.".into());
-        }
+        expected_reject(result, self.name(), "future nonce transaction")?;
 
         Ok(())
     }

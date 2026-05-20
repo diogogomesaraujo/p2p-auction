@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::Data,
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_reject},
 };
 use async_trait::async_trait;
 
@@ -39,7 +39,7 @@ impl Bot for OverbidBot {
             })
             .await;
 
-        expected_rejection(result, "overbid transaction")?;
+        expected_reject(result, self.name(), "overbid transaction")?;
 
         Ok(())
     }

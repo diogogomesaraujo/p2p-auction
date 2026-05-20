@@ -107,17 +107,49 @@ pub async fn run_bot<B: Bot + Send>(
     Ok(())
 }
 
-pub fn expected_rejection(
+pub fn expected_reject(
     result: Result<Response<TransactionResponse>, Status>,
+    bot: &str,
     attack: &str,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match result {
-        Err(_) => Ok(()),
+        Err(e) => {
+            println!("{bot}: attacker failed as expected ({attack} rejected: {e})");
+            Ok(())
+        }
+
         Ok(response) => {
-            if response.into_inner().status == 1 {
+            let status = response.into_inner().status;
+
+            if status == 1 {
+                println!("{bot}: attacker failed as expected ({attack} rejected)");
                 Ok(())
             } else {
-                Err(format!("{attack} was accepted but should have been rejected.").into())
+                Err(
+                    format!("{bot}: attacker succeeded unexpectedly ({attack} was accepted)")
+                        .into(),
+                )
+            }
+        }
+    }
+}
+
+pub fn expected_accept(
+    result: Result<Response<TransactionResponse>, Status>,
+    bot: &str,
+    action: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    match result {
+        Err(e) => Err(format!("{bot}: expected success, but {action} failed: {e}").into()),
+
+        Ok(response) => {
+            let status = response.into_inner().status;
+
+            if status == 0 {
+                println!("{bot}: action accepted as expected ({action})");
+                Ok(())
+            } else {
+                Err(format!("{bot}: expected success, but {action} was rejected").into())
             }
         }
     }

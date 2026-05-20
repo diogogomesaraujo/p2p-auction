@@ -2,7 +2,7 @@ use std::{error::Error, time::Duration};
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_accept, expected_reject},
     time::now_unix_plus,
 };
 use async_trait::async_trait;
@@ -59,9 +59,10 @@ impl Bot for ByzantineBot {
             tx.signature = s;
 
             let result = self.ctx.client.transaction(Request::new(tx.into())).await;
-            expected_rejection(result, "corrupted-signature transaction")?;
+            expected_reject(result, self.name(), "corrupted-signature transaction")?;
         } else {
-            self.ctx.client.transaction(Request::new(tx.into())).await?;
+            let result = self.ctx.client.transaction(Request::new(tx.into())).await;
+            expected_accept(result, self.name(), "valid byzantine transaction")?;
             self.ctx.nonce += 1;
         }
 

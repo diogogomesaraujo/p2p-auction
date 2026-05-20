@@ -56,7 +56,7 @@ impl Bot for EclipseBot {
                 })
                 .await;
 
-            if result.is_ok() {
+            if result.as_ref().is_ok_and(|r| r.get_ref().status == 0) {
                 accepted += 1;
             }
 

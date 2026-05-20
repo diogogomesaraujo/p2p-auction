@@ -2,7 +2,7 @@ use std::error::Error;
 
 use crate::{
     blockchain::transaction::{Data, Transaction},
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_accept, expected_reject},
 };
 use async_trait::async_trait;
 use tonic::Request;
@@ -57,11 +57,9 @@ impl Bot for ReplayBot {
         let result = self.ctx.client.transaction(Request::new(tx.into())).await;
 
         if self.submitted_once {
-            expected_rejection(result, "replayed transaction")?;
-            println!("{} rejected replay as expected", self.name());
+            expected_reject(result, self.name(), "replayed transaction")?;
         } else {
-            result?;
-            println!("{} submitted original transaction", self.name());
+            expected_accept(result, self.name(), "original transaction")?;
             self.submitted_once = true;
             self.ctx.nonce += 1;
         }

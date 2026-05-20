@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     blockchain::transaction::Data,
-    bot::{Bot, Context, expected_rejection},
+    bot::{Bot, Context, expected_reject},
 };
 use async_trait::async_trait;
 use rand::{Rng, rngs::OsRng};
@@ -50,7 +50,7 @@ impl Bot for PastAuctionBot {
             })
             .await;
 
-        expected_rejection(create_result, "past auction creation")?;
+        expected_reject(create_result, self.name(), "past auction creation")?;
 
         let bid_result = self
             .ctx
@@ -60,7 +60,7 @@ impl Bot for PastAuctionBot {
             })
             .await;
 
-        expected_rejection(bid_result, "bid on past auction")?;
+        expected_reject(bid_result, self.name(), "bid on past auction")?;
 
         Ok(())
     }
