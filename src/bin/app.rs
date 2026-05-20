@@ -1265,6 +1265,8 @@ mod dashboard {
     }
 
     pub mod bid {
+        use std::error::Error;
+
         use blocktion::{
             blockchain::transaction::{Data, Transaction},
             state::service::{
@@ -1479,18 +1481,28 @@ mod dashboard {
                                                 let res = res.into_inner();
                                                 match &res.block {
                                                     Some(b) => {
-                                                        highest_bid = b.transactions.iter().fold(
+                                                        highest_bid =match  b.transactions.iter().try_fold(
                                                             highest_bid,
-                                                            |acc, t| {
+                                                            |acc, t| -> Result<u64, Box<dyn Error + Send + Sync>>{
+                                                                if let Some(blocktion::state::service::transaction::Record::StopAuctionRequest(stop_auction)) = &t.record {
+                                                                    if stop_auction.auction_id == auction_id_text{
+                                                                        return Err("There is already a stop auction order".into());
+                                                                    }
+                                                                }
                                                                 if let Some(blocktion::state::service::transaction::Record::BidRequest(bid)) = &t.record  {
-                                                                    if bid.auction_id == auction_id_text{return u64::max(bid.amount, acc);}
+                                                                    if bid.auction_id == auction_id_text{
+                                                                        return Ok(u64::max(bid.amount, acc));
+                                                                    }
                                                                 }
                                                                 if let Some(blocktion::state::service::transaction::Record::CreateAuctionRequest(create_auction)) = &t.record {
-                                                                    return u64::max(create_auction.start_amount, acc);
+                                                                    return Ok(u64::max(create_auction.start_amount, acc));
                                                                 }
-                                                                acc
+                                                                Ok(acc)
                                                             },
-                                                        );
+                                                        ) { Ok(hb) => hb, Err(e) => {
+                                                            exit_popup(&mut self, Some(e.to_string()));
+                                                            return None;
+                                                        }};
                                                         hash = match res.next_block_hash {
                                                             Some(h) => h,
                                                             _ => break,
@@ -1790,6 +1802,16 @@ mod dashboard {
                     render_private_key_popup(f, &r, &p);
                 }
             }
+        }
+    }
+
+    pub mod available_auctions {
+        use ratatui::widgets::TableState;
+
+        pub struct AvailableAuctions {
+            pub table_state: TableState,
+            pub node: String,
+            pub popup: Option<String>,
         }
     }
 

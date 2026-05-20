@@ -1,9 +1,10 @@
 use crate::blockchain::block::Block;
 use crate::blockchain::transaction::{Data, Transaction};
-use crate::blockchain::{Blockchain, WorldState};
+use crate::blockchain::{Blockchain, EXECUTE_AFTER_N_BLOCKS, WorldState};
 use crate::config::MIN_TX_INTERVAL;
 use crate::state::service::{
-    AccountExistsRequest, AuctionExistsRequest, AuctionExistsResponse, StopAuction,
+    AccountExistsRequest, AuctionExistsRequest, AuctionExistsResponse, FirstBlockHashRequest,
+    FirstBlockHashResponse, StopAuction,
 };
 use service::node_rpc_service_server::{NodeRpcService, NodeRpcServiceServer};
 use service::transaction_request::Record;
@@ -70,14 +71,33 @@ pub mod service {
 
 #[tonic::async_trait]
 impl NodeRpcService for Arc<RwLock<State>> {
+    async fn first_block_hash(
+        &self,
+        _: Request<FirstBlockHashRequest>,
+    ) -> Result<Response<FirstBlockHashResponse>, Status> {
+        if self.read().await.blockchain.commited_pointer - EXECUTE_AFTER_N_BLOCKS >= 0 {
+            Ok(Response::new(FirstBlockHashResponse {
+                hash: self.read().await.blockchain.longest_chain.get(0).cloned(),
+            }))
+        } else {
+            Ok(Response::new(FirstBlockHashResponse { hash: None }))
+        }
+    }
+
     async fn auction_exists(
         &self,
         request: Request<AuctionExistsRequest>,
     ) -> Result<Response<AuctionExistsResponse>, Status> {
         let req = request.into_inner();
         let blocks = self.read().await.blockchain.blocks.clone();
+        let longest_chain = self.read().await.blockchain.longest_chain.clone();
+        let blocks: Vec<Block> = longest_chain
+            [0..(longest_chain.len().saturating_sub(EXECUTE_AFTER_N_BLOCKS))]
+            .iter()
+            .filter_map(|h| blocks.get(h).cloned())
+            .collect();
         let b = blocks.into_iter().find(|b| {
-            b.1.transactions.iter().any(|t| {
+            b.transactions.iter().any(|t| {
                 if let Data::CreateAuction { auction_id, .. } = &t.record
                     && auction_id == &req.auction_id
                 {
@@ -90,7 +110,7 @@ impl NodeRpcService for Arc<RwLock<State>> {
         match b {
             Some(b) => Ok(Response::new(AuctionExistsResponse {
                 status: 0,
-                block_hash: Some(b.1.hash.to_string()),
+                block_hash: Some(b.hash.to_string()),
             })),
             _ => Ok(Response::new(AuctionExistsResponse {
                 status: 0,

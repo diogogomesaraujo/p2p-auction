@@ -1,12 +1,14 @@
 use crate::{
     behaviour::DhtBehaviourEvent,
     blockchain::{
+        WorldState,
         block::Block,
         transaction::{Data, Transaction},
     },
     config::REQUEST_LONGEST_CHAIN_AFTER,
     runtime::Runtime,
     state::{Runnable, State},
+    time::now_unix,
     topic::BLOCKS,
 };
 use async_trait::async_trait;
@@ -27,6 +29,7 @@ pub const BOOT_NODE_MULTIADDR: &str = "/dnsaddr/bootstrap.libp2p.io";
 pub const LISTEN_ON: &str = "/ip4/0.0.0.0/tcp/0";
 
 const NEW_BLOCK_SPEED: Duration = Duration::from_secs(3);
+const STOP_AUCTIONS_SPEED: Duration = Duration::from_secs(5);
 
 /// Trait that represents the RPC structure used for nodes (both boot nodes and regular ones).
 #[async_trait]
@@ -106,6 +109,64 @@ pub trait VirtualMachine {
             tokio::spawn(async move {
                 state.run().await?;
                 Ok::<(), Box<dyn Error + Send + Sync>>(())
+            });
+        }
+
+        // stop auctions thread
+
+        {
+            let state = runtime.state.clone();
+            let keys = match Keypair::from_bytes(&keys.to_bytes()) {
+                Ok(keys) => keys,
+                Err(e) => return Err(e.to_string().into()),
+            };
+            tokio::spawn(async move {
+                loop {
+                    sleep(STOP_AUCTIONS_SPEED).await;
+
+                    let auctions = state.read().await.blockchain.auctions.clone();
+                    let time = match now_unix() {
+                        Ok(t) => t,
+                        _ => continue,
+                    };
+
+                    for (id, (_, stop_time)) in auctions.iter() {
+                        if stop_time <= &time {
+                            let nonce = match state
+                                .read()
+                                .await
+                                .blockchain
+                                .get_account(&keys.public.encode_hex::<String>())
+                            {
+                                Some(account) => account.nonce,
+                                None => continue,
+                            };
+                            let transaction = match Transaction::sign(
+                                Data::StopAuction {
+                                    auction_id: id.to_string(),
+                                },
+                                &keys.public.encode_hex::<String>(),
+                                nonce,
+                                &keys,
+                            ) {
+                                Ok(t) => t,
+                                _ => continue,
+                            };
+                            match state
+                                .write()
+                                .await
+                                .blockchain
+                                .transaction_pool
+                                .add_transaction(transaction)
+                            {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!("{e}")
+                                }
+                            };
+                        }
+                    }
+                }
             });
         }
 
