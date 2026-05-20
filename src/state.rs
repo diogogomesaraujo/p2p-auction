@@ -198,19 +198,30 @@ impl NodeRpcService for Arc<RwLock<State>> {
     ) -> Result<Response<BlockInfoResponse>, Status> {
         let request = request.into_inner();
 
-        match self
+        info!("{:?}", request);
+
+        let maybe_block_hash = self
             .read()
             .await
             .blockchain
             .get_block_from_hash(&request.hash)
-        {
+            .cloned();
+
+        match maybe_block_hash {
             Some(block) => Ok(Response::new(BlockInfoResponse {
                 status: 0,
                 block: Some(block.clone().into()),
+                next_block_hash: self
+                    .read()
+                    .await
+                    .blockchain
+                    .get_next_block_hash_from_hash(&block.hash)
+                    .cloned(),
             })),
             None => Ok(Response::new(BlockInfoResponse {
                 status: 1,
                 block: None,
+                next_block_hash: None,
             })),
         }
     }
@@ -219,6 +230,8 @@ impl NodeRpcService for Arc<RwLock<State>> {
         &self,
         request: Request<AccountExistsRequest>,
     ) -> Result<Response<AccountExistsResponse>, Status> {
+        info!("{:?}", request);
+
         let public_key = match &request.into_inner().account {
             Some(account) => account.public_key.clone(),
             None => {

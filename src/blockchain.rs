@@ -1087,10 +1087,6 @@ impl Blockchain {
 
         Ok(())
     }
-
-    pub fn get_block_from_hash(&self, hash: &str) -> Option<&Block> {
-        self.blocks.get(hash)
-    }
 }
 
 pub trait WorldState {
@@ -1100,6 +1096,8 @@ pub trait WorldState {
     fn create_auction(&mut self, auction_id: &str, block_id: &str, stop_time: u64);
     fn get_auction(&mut self, auction_id: &str) -> Option<&Transaction>;
     fn remove_auction(&mut self, auction_id: &str);
+    fn get_block_from_hash(&self, hash: &str) -> Option<&Block>;
+    fn get_next_block_hash_from_hash(&self, hash: &str) -> Option<&String>;
 }
 
 impl WorldState for Blockchain {
@@ -1128,6 +1126,33 @@ impl WorldState for Blockchain {
             }
         }
         None
+    }
+
+    fn get_block_from_hash(&self, hash: &str) -> Option<&Block> {
+        if self.longest_chain.contains(&hash.to_string()) {
+            self.blocks.get(hash)
+        } else {
+            None
+        }
+    }
+
+    fn get_next_block_hash_from_hash(&self, hash: &str) -> Option<&String> {
+        if let Some(i) = self
+            .longest_chain
+            .iter()
+            .enumerate()
+            .fold(None, |acc, (i, h)| {
+                if h == &hash.to_string() {
+                    Some(i + 1)
+                } else {
+                    acc
+                }
+            })
+        {
+            self.longest_chain.get(i)
+        } else {
+            None
+        }
     }
 
     fn create_auction(&mut self, auction_id: &str, block_id: &str, stop_time: u64) {

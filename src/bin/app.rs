@@ -1475,23 +1475,32 @@ mod dashboard {
                                             .block_info(Request::new(BlockInfoRequest { hash }))
                                             .await
                                         {
-                                            Ok(res) => match res.into_inner().block {
-                                                Some(b) => {
-                                                    highest_bid = b.transactions.iter().fold(
-                                                        highest_bid,
-                                                        |acc, t| {
-                                                            if let Some(blocktion::state::service::transaction::Record::BidRequest(bid)) = &t.record {
-                                                                return u64::max(bid.amount, acc);
-                                                            }
-                                                            acc
-                                                        },
-                                                    );
-                                                    hash = b.hash;
+                                            Ok(res) => {
+                                                let res = res.into_inner();
+                                                match &res.block {
+                                                    Some(b) => {
+                                                        highest_bid = b.transactions.iter().fold(
+                                                            highest_bid,
+                                                            |acc, t| {
+                                                                if let Some(blocktion::state::service::transaction::Record::BidRequest(bid)) = &t.record  {
+                                                                    if bid.auction_id == auction_id_text{return u64::max(bid.amount, acc);}
+                                                                }
+                                                                if let Some(blocktion::state::service::transaction::Record::CreateAuctionRequest(create_auction)) = &t.record {
+                                                                    return u64::max(create_auction.start_amount, acc);
+                                                                }
+                                                                acc
+                                                            },
+                                                        );
+                                                        hash = match res.next_block_hash {
+                                                            Some(h) => h,
+                                                            _ => break,
+                                                        };
+                                                    }
+                                                    None => {
+                                                        break;
+                                                    }
                                                 }
-                                                None => {
-                                                    break;
-                                                }
-                                            },
+                                            }
                                             _ => {
                                                 exit_popup(
                                                     &mut self,
@@ -1502,7 +1511,7 @@ mod dashboard {
                                         }
                                     }
 
-                                    if highest_bid >= amount {
+                                    if highest_bid > amount {
                                         exit_popup(
                                             &mut self,
                                             Some(
