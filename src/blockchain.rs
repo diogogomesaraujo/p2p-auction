@@ -1067,6 +1067,7 @@ impl WorldState for Blockchain {
 pub mod test {
     use crate::blockchain::block::Block;
     use crate::blockchain::hash::{encode_hash, hash};
+    use crate::blockchain::merkle::root;
     use crate::blockchain::transaction::TransactionPool;
     use crate::blockchain::{Blockchain, WorldState};
     use crate::blockchain::{
@@ -1094,7 +1095,7 @@ pub mod test {
 
     /* Transaction */
 
-    /// Tests that a correctly signed transaction passes verification
+    /// Tests that a correctly signed transaction passes verification.
     #[test]
     fn test_transaction_valid_signature_verifies() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1103,7 +1104,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that tampering with the nonce after signing invalidates the transaction
+    /// Tests that tampering with the nonce after signing invalidates the transaction.
     #[test]
     fn test_transaction_tampered_nonce_fails_verification()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1114,7 +1115,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that tampering with the record after signing invalidates the transaction
+    /// Tests that tampering with the record after signing invalidates the transaction.
     #[test]
     fn test_transaction_tampered_record_fails_verification()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1127,7 +1128,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that a transaction signed by one keypair cannot be verified with another keypair's public key
+    /// Tests that a transaction signed by one keypair cannot be verified with another keypair's public key.
     #[test]
     fn test_transaction_wrong_keypair_fails_verification()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1139,7 +1140,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that two different transactions produce different IDs
+    /// Tests that two different transactions produce different IDs.
     #[test]
     fn test_transaction_unique_ids() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k1 = generate_keypair();
@@ -1150,7 +1151,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that flush() drains the pool and returns all transactions sorted by timestamp
+    /// Tests that flush() drains the pool and returns all transactions sorted by timestamp.
     #[test]
     fn test_pool_flush_returns_transactions_and_empties_pool()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1169,7 +1170,46 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that remove() correctly deletes a transaction from the pool by timestamp
+    /* TransactionPool */
+
+    /// Tests that replay() propperly detects duplicate nonces for same sender.
+    #[test]
+    fn test_pool_replay_detects_same_sender_same_nonce() -> Result<(), Box<dyn Error + Send + Sync>>
+    {
+        let k = generate_keypair();
+        let pk = public_key_to_string(&k.public);
+
+        let tx1 = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "a1".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &pk,
+            1,
+            &k,
+        )?;
+
+        let tx2 = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "a2".to_string(),
+                start_amount: 20,
+                stop_time: 9999999999,
+            },
+            &pk,
+            1,
+            &k,
+        )?;
+
+        let mut pool = TransactionPool::new();
+        pool.add_transaction(tx1)?;
+
+        assert!(pool.replay(&tx2));
+
+        Ok(())
+    }
+
+    /// Tests that remove() correctly deletes a transaction from the pool by timestamp.
     #[test]
     fn test_pool_remove_deletes_transaction() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1182,7 +1222,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that a transaction added to the pool can be found via contains()
+    /// Tests that a transaction added to the pool can be found via contains().
     #[test]
     fn test_pool_added_transaction_is_contained() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1195,7 +1235,7 @@ pub mod test {
 
     /* Blocks */
 
-    /// Tests that a freshly mined block passes its own verification
+    /// Tests that a freshly mined block passes its own verification.
     #[test]
     fn test_block_mined_block_is_valid() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1206,7 +1246,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that tampering with the nonce after mining invalidates the block
+    /// Tests that tampering with the nonce after mining invalidates the block.
     #[test]
     fn test_block_tampered_nonce_fails_verification() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1218,7 +1258,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that replacing the stored hash with a different value fails verification
+    /// Tests that replacing the stored hash with a different value fails verification.
     #[test]
     fn test_block_tampered_hash_fails_verification() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1230,7 +1270,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that tampering with a transaction inside a mined block fails verification
+    /// Tests that tampering with a transaction inside a mined block fails verification.
     #[test]
     fn test_block_tampered_transaction_fails_verification()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1243,19 +1283,81 @@ pub mod test {
         Ok(())
     }
 
+    /// Test that block with transactions reordered is rejected.
+    #[test]
+    fn test_block_verify_rejects_transaction_reordering() -> Result<(), Box<dyn Error + Send + Sync>>
+    {
+        let k1 = generate_keypair();
+        let k2 = generate_keypair();
+
+        let pk = public_key_to_string(&k1.public);
+
+        let tx1 = signed_create_account_tx(&k1, 0)?;
+        let tx2 = signed_create_account_tx(&k2, 0)?;
+
+        let mut block = Block::new(pk, None, vec![tx1.clone(), tx2.clone()], u32::MAX)?;
+        block.transactions = vec![tx2, tx1];
+
+        assert!(!block.verify()?);
+
+        Ok(())
+    }
+
+    /* Merkle */
+
+    /// Test that merkle root gives same output always for same input
+    #[test]
+    fn test_merkle_root_is_deterministic() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let k1 = generate_keypair();
+        let k2 = generate_keypair();
+
+        let txs = vec![
+            signed_create_account_tx(&k1, 0)?,
+            signed_create_account_tx(&k2, 0)?,
+        ];
+
+        assert_eq!(root(&txs)?, root(&txs)?);
+
+        Ok(())
+    }
+
+    /// Test that merkle root changes when the ordering of transactions changes.
+    #[test]
+    fn test_merkle_root_changes_when_order_changes() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let k1 = generate_keypair();
+        let k2 = generate_keypair();
+
+        let tx1 = signed_create_account_tx(&k1, 0)?;
+        let tx2 = signed_create_account_tx(&k2, 0)?;
+
+        let a = vec![tx1.clone(), tx2.clone()];
+        let b = vec![tx2, tx1];
+
+        assert_ne!(root(&a)?, root(&b)?);
+
+        Ok(())
+    }
+
+    /// Test that merkle root fails when there are no transactions.
+    #[test]
+    fn test_merkle_root_empty_transactions_fails() {
+        let txs: Vec<Transaction> = vec![];
+        assert!(root(&txs).is_err());
+    }
+
     /* WorldState */
 
-    /// Tests that a created account can be retrieved and a non-existent one returns None
+    /// Tests that a created account can be retrieved and a non-existent one returns None.
     #[test]
     fn test_worldstate_account_creation_and_lookup() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
         chain.create_account("walter_pk".to_string())?;
         assert!(chain.get_account("walter_pk").is_some());
-        assert!(chain.get_account("walter_pk").is_none());
+        assert!(chain.get_account("jesse_pk").is_none());
         Ok(())
     }
 
-    /// Tests that attempting to create an account with an already existing public key fails
+    /// Tests that attempting to create an account with an already existing public key fails.
     #[test]
     fn test_worldstate_duplicate_account_is_rejected() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
@@ -1267,7 +1369,7 @@ pub mod test {
 
     /* accept_block() */
 
-    /// Tests that accept_block() rejects a block whose hash does not satisfy PoW
+    /// Tests that accept_block() rejects a block whose hash does not satisfy PoW.
     #[test]
     fn test_accept_block_rejects_invalid_pow() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
@@ -1284,7 +1386,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that accept_block() rejects a block that does not point to the current chain tip
+    /// Tests that accept_block() rejects a block that does not point to the current chain tip.
     #[test]
     fn test_accept_block_rejects_wrong_previous_hash() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1300,9 +1402,9 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that accept_block() rejects a block whose transactions are not in the mempool
+    /// Tests that accept_block() rejects a block whose transactions are not in the treansaction pool.
     #[test]
-    fn test_accept_block_rejects_transactions_not_in_mempool()
+    fn test_accept_block_rejects_transactions_not_in_transaction_pool()
     -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
         let pk = public_key_to_string(&k.public);
@@ -1311,13 +1413,13 @@ pub mod test {
 
         let mut chain = Blockchain::new(u32::MAX)?;
         chain.create_account(pk)?;
-        // intentionally not adding t to the mempool
+        // intentionally not adding t to the transaction pool
 
         assert!(chain.accept_block(block, &HashMap::new()).is_err());
         Ok(())
     }
 
-    /// Tests that accept_block() rejects a block proposed by an unknown miner
+    /// Tests that accept_block() rejects a block proposed by an unknown miner.
     #[test]
     fn test_accept_block_rejects_unknown_miner() -> Result<(), Box<dyn Error + Send + Sync>> {
         let k = generate_keypair();
@@ -1335,7 +1437,7 @@ pub mod test {
 
     /* Blockchain */
 
-    /// Tests that an empty blockchain passes verification
+    /// Tests that an empty blockchain passes verification.
     #[test]
     fn test_blockchain_empty_chain_is_valid() -> Result<(), Box<dyn Error + Send + Sync>> {
         let chain = Blockchain::new(u32::MAX)?;
@@ -1343,7 +1445,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that propose_block() mines, commits the block, and the chain remains valid
+    /// Tests that propose_block() mines, commits the block, and the chain remains valid.
     #[test]
     fn test_blockchain_propose_block_grows_chain() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
@@ -1357,7 +1459,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that propose_block() fails when the mempool is empty
+    /// Tests that propose_block() fails when the transaction pool is empty.
     #[test]
     fn test_blockchain_propose_block_fails_with_empty_mempool()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1368,7 +1470,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that propose_block() correctly executes transactions, creating the account on-chain
+    /// Tests that propose_block() correctly executes transactions, creating the account on-chain.
     #[test]
     fn test_blockchain_propose_block_executes_transactions()
     -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -1382,7 +1484,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that a multi-block chain remains valid after sequential propose_block() calls
+    /// Tests that a multi-block chain remains valid after sequential propose_block() calls.
     #[test]
     fn test_blockchain_multi_block_chain_is_valid() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
@@ -1398,7 +1500,7 @@ pub mod test {
         Ok(())
     }
 
-    /// Tests that fix() is a no-op on a linear chain with no forks
+    /// Tests that fix() direcly returns longest chain as was on a linear chain with no forks.
     #[test]
     fn test_blockchain_fix_is_noop_on_linear_chain() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut chain = Blockchain::new(u32::MAX)?;
@@ -1414,7 +1516,7 @@ pub mod test {
     }
 
     /// Tests that fix() resolves a fork by keeping the winning branch and returning
-    /// the discarded branch's transactions to the mempool
+    /// the discarded branch's transactions to the transaction pool.
     #[test]
     fn test_blockchain_fix_resolves_fork() -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut blockchain = Blockchain::new(u32::MAX)?;
@@ -1473,6 +1575,305 @@ pub mod test {
         Ok(())
     }
 
+    /// Test that blockchain create account is not executed until two new blocks
+    /// are added to longest chain (due to EXECUTE_AFTER_N_BLOCKS)
+    #[test]
+    fn test_blockchain_account_is_not_executed_until_two_confirmations()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k1 = generate_keypair();
+        let pk1 = public_key_to_string(&k1.public);
+
+        mine_create_account(&mut chain, &k1)?;
+        assert!(chain.get_account(&pk1).is_none());
+
+        mine_create_account(&mut chain, &generate_keypair())?;
+        assert!(chain.get_account(&pk1).is_none());
+
+        mine_create_account(&mut chain, &generate_keypair())?;
+        assert!(chain.get_account(&pk1).is_some());
+
+        Ok(())
+    }
+
+    /// Tests that a created account can later submit a valid nonce transaction,
+    /// and that the account nonce is incremented only after confirmation.
+    #[test]
+    fn test_blockchain_create_account_then_valid_nonce_transaction_flow()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert_eq!(chain.get_account(&user_pk).unwrap().nonce, 1);
+
+        let tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "auction-1".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            1,
+            &user,
+        )?;
+
+        chain.add_transaction(tx)?;
+        chain.propose_block(&user_pk, &HashMap::new())?;
+
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert_eq!(chain.get_account(&user_pk).unwrap().nonce, 2);
+
+        Ok(())
+    }
+
+    /// Tests that transactions from accounts that do not exist are rejected from the transaction pool.
+    #[test]
+    fn test_blockchain_rejects_unknown_account_transaction()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k = generate_keypair();
+        let pk = public_key_to_string(&k.public);
+
+        let tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "auction-1".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &pk,
+            1,
+            &k,
+        )?;
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that a transaction with an already-used nonce is rejected after account execution.
+    #[test]
+    fn test_blockchain_rejects_old_nonce_after_execution()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        let tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "auction-1".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            0,
+            &user,
+        )?;
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that an invalid transaction included in a mined block does not mutate account state.
+    #[test]
+    fn test_blockchain_invalid_transaction_inside_block_does_not_execute()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        let bad_tx = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "bad-auction".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            99,
+            &user,
+        )?;
+
+        chain.transaction_pool.add_transaction(bad_tx)?;
+        chain.propose_block(&user_pk, &HashMap::new())?;
+
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        assert_eq!(chain.get_account(&user_pk).unwrap().nonce, 1);
+
+        Ok(())
+    }
+
+    /* Attacks */
+
+    /// Tests that transactions with malformed or invalid signatures are rejected from the transaction pool.
+    #[test]
+    fn test_attack_invalid_signature_rejected_from_mempool()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k = generate_keypair();
+        let mut tx = signed_create_account_tx(&k, 0)?;
+        tx.signature = "deadbeef".to_string();
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that an attacker cannot create an account for another public key.
+    #[test]
+    fn test_attack_create_account_sender_mismatch_rejected()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let attacker = generate_keypair();
+        let victim = generate_keypair();
+
+        let attacker_pk = public_key_to_string(&attacker.public);
+        let victim_pk = public_key_to_string(&victim.public);
+
+        let tx = Transaction::sign(
+            Data::CreateUserAccount {
+                public_key: victim_pk,
+            },
+            &attacker_pk,
+            0,
+            &attacker,
+        )?;
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that account creation transactions must use nonce zero.
+    #[test]
+    fn test_attack_create_account_with_non_zero_nonce_rejected()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k = generate_keypair();
+        let tx = signed_create_account_tx(&k, 1)?;
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that two pending transactions from the same sender cannot use the same nonce.
+    #[test]
+    fn test_attack_duplicate_pending_nonce_rejected() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let user = generate_keypair();
+        let user_pk = public_key_to_string(&user.public);
+
+        mine_create_account(&mut chain, &user)?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+        mine_create_account(&mut chain, &generate_keypair())?;
+
+        let tx1 = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "auction-a".to_string(),
+                start_amount: 10,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            1,
+            &user,
+        )?;
+
+        let tx2 = Transaction::sign(
+            Data::CreateAuction {
+                auction_id: "auction-b".to_string(),
+                start_amount: 20,
+                stop_time: 9999999999,
+            },
+            &user_pk,
+            1,
+            &user,
+        )?;
+
+        chain.add_transaction(tx1)?;
+        assert!(chain.add_transaction(tx2).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that a transaction already recorded on-chain cannot be replayed into the transaction pool.
+    #[test]
+    fn test_attack_replay_recorded_transaction_rejected() -> Result<(), Box<dyn Error + Send + Sync>>
+    {
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        let k = generate_keypair();
+        let pk = public_key_to_string(&k.public);
+        let tx = signed_create_account_tx(&k, 0)?;
+
+        chain.add_transaction(tx.clone())?;
+        chain.propose_block(&pk, &HashMap::new())?;
+
+        assert!(chain.add_transaction(tx).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that accept_block() rejects a block whose Merkle root was tampered with.
+    #[test]
+    fn test_attack_accept_block_with_tampered_merkle_root_rejected()
+    -> Result<(), Box<dyn Error + Send + Sync>> {
+        let miner = generate_keypair();
+        let miner_pk = public_key_to_string(&miner.public);
+
+        let tx = signed_create_account_tx(&miner, 0)?;
+        let mut block = Block::new(miner_pk, None, vec![tx], u32::MAX)?;
+        block.merkle_root = "bad-root".to_string();
+
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        assert!(chain.accept_block(block, &HashMap::new()).is_err());
+
+        Ok(())
+    }
+
+    /// Tests that accept_block() rejects the same block when submitted twice.
+    #[test]
+    fn test_attack_accept_same_block_twice_rejected() -> Result<(), Box<dyn Error + Send + Sync>> {
+        let miner = generate_keypair();
+        let miner_pk = public_key_to_string(&miner.public);
+
+        let tx = signed_create_account_tx(&miner, 0)?;
+        let block = Block::new(miner_pk, None, vec![tx], u32::MAX)?;
+
+        let mut chain = Blockchain::new(u32::MAX)?;
+
+        chain.accept_block(block.clone(), &HashMap::new())?;
+        assert!(chain.accept_block(block, &HashMap::new()).is_err());
+
+        Ok(())
+    }
+
     /* Utility functions */
 
     #[test]
@@ -1527,5 +1928,16 @@ pub mod test {
 
     pub fn generate_keypair() -> Keypair {
         Keypair::generate(&mut OsRng)
+    }
+
+    pub fn mine_create_account(
+        chain: &mut Blockchain,
+        keys: &Keypair,
+    ) -> Result<Block, Box<dyn Error + Send + Sync>> {
+        let pk = public_key_to_string(&keys.public);
+        let tx = signed_create_account_tx(keys, 0)?;
+
+        chain.add_transaction(tx)?;
+        chain.propose_block(&pk, &HashMap::new())
     }
 }
