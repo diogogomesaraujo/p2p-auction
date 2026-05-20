@@ -735,7 +735,7 @@ impl Blockchain {
         notifiers: &HashMap<String, Arc<(Notify, AtomicBool)>>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         if self.blocks.contains_key(&block.hash) {
-            return Err("Already known block.".into());
+            return Err(AcceptBlockError::Duplicate.into());
         }
 
         if self.pruned.contains(&block.hash) {

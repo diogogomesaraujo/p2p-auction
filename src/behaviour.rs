@@ -268,7 +268,10 @@ impl DhtBehaviourEvent {
                                     runtime.state.read().await.blockchain.longest_chain.clone();
                                 let blocks = runtime.state.read().await.blockchain.blocks.clone();
                                 Response::LongestChainBlocks(
-                                    longest_chain.iter().map(|h| blocks[h].clone()).collect(),
+                                    longest_chain
+                                        .iter()
+                                        .filter_map(|h| blocks.get(h).cloned())
+                                        .collect(),
                                 )
                             }
 
@@ -308,14 +311,21 @@ impl DhtBehaviourEvent {
                         Response::BlocksByHashes(blocks) => {
                             info!("Received requested blocks from {:?}", peer);
                             for b in blocks {
-                                runtime.accept_block_from_r_r(b, peer).await?;
+                                if let Err(e) = runtime.accept_block_from_r_r(b, peer).await {
+                                    warn!("Failed to accept requested block from {:?}: {e}", peer);
+                                }
                             }
                         }
 
                         Response::LongestChainBlocks(blocks) => {
                             info!("Received longest chain of blocks from peer {:?}", peer);
                             for b in blocks {
-                                runtime.accept_block_from_r_r(b, peer).await?;
+                                if let Err(e) = runtime.accept_block_from_r_r(b, peer).await {
+                                    warn!(
+                                        "Failed to accept longest-chain block from {:?}: {e}",
+                                        peer
+                                    );
+                                }
                             }
                         }
 
