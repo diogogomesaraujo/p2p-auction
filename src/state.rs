@@ -75,7 +75,8 @@ impl NodeRpcService for Arc<RwLock<State>> {
         &self,
         _: Request<FirstBlockHashRequest>,
     ) -> Result<Response<FirstBlockHashResponse>, Status> {
-        if self.read().await.blockchain.commited_pointer - EXECUTE_AFTER_N_BLOCKS >= 0 {
+        if self.read().await.blockchain.commited_pointer as i32 - EXECUTE_AFTER_N_BLOCKS as i32 >= 0
+        {
             Ok(Response::new(FirstBlockHashResponse {
                 hash: self.read().await.blockchain.longest_chain.get(0).cloned(),
             }))

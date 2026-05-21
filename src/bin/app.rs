@@ -15,7 +15,6 @@ pub trait Screen {
 pub trait Section: Send {
     async fn handle_io(&mut self, input: Input) -> Option<Box<dyn Section>>;
     fn render(&mut self, r: &Rect, f: &mut Frame, focus: bool);
-    fn top(&self) -> bool;
     fn title(&self) -> String;
     fn has_popup(&self) -> bool;
 }
@@ -270,7 +269,9 @@ mod logkeys {
                             {
                                 let res = res.into_inner();
                                 if let Some(_) = res.nonce {
-                                    return Some(Box::new(Dashboard::new(&self.node, &public_key)));
+                                    return Some(Box::new(
+                                        Dashboard::new(&self.node, &public_key).await,
+                                    ));
                                 }
                             }
                         }
@@ -737,7 +738,9 @@ mod dashboard {
 
     use crate::{
         Screen, Section,
-        dashboard::{bid::Bid, options::create_auction::CreateAuction},
+        dashboard::{
+            available_auctions::AvailableAuctions, bid::Bid, options::create_auction::CreateAuction,
+        },
     };
     use ratatui::{
         layout::{Alignment, Constraint, Layout},
@@ -874,10 +877,6 @@ mod dashboard {
             impl Section for CreateAuction<'_> {
                 fn title(&self) -> String {
                     " Create Auction ".to_string()
-                }
-
-                fn top(&self) -> bool {
-                    matches!(self.field, Field::StartAmount)
                 }
 
                 fn has_popup(&self) -> bool {
@@ -1365,10 +1364,6 @@ mod dashboard {
                 " Bid ".to_string()
             }
 
-            fn top(&self) -> bool {
-                matches!(self.field, Field::AuctionId)
-            }
-
             fn has_popup(&self) -> bool {
                 match &self.popup {
                     Some(_) => true,
@@ -1806,12 +1801,220 @@ mod dashboard {
     }
 
     pub mod available_auctions {
-        use ratatui::widgets::TableState;
+        use std::collections::{HashMap, HashSet};
 
-        pub struct AvailableAuctions {
+        use blocktion::state::service::{
+            BlockInfoRequest, FirstBlockHashRequest, node_rpc_service_client::NodeRpcServiceClient,
+        };
+        use ratatui::{
+            Frame,
+            layout::{Constraint, Layout, Rect},
+            style::{Style, Stylize},
+            widgets::{Row, Table, TableState},
+        };
+        use ratatui_textarea::{Input, Key};
+        use tonic::Request;
+
+        use crate::Section;
+
+        pub struct AvailableAuctions<'a> {
             pub table_state: TableState,
-            pub node: String,
             pub popup: Option<String>,
+            pub header: Row<'a>,
+            pub rows: Vec<Row<'a>>,
+            pub widths: [Constraint; 5],
+        }
+
+        impl<'a> AvailableAuctions<'a> {
+            pub async fn new(node: &str) -> Self {
+                let mut popup = None;
+
+                let header = Row::new([
+                    "Auction (ID)",
+                    "Creator (PK)",
+                    "Highest Bid",
+                    "Start Amount",
+                    "Total Bids",
+                ]);
+
+                let widths = [
+                    Constraint::Percentage(25),
+                    Constraint::Percentage(25),
+                    Constraint::Min(2),
+                    Constraint::Min(2),
+                    Constraint::Min(2),
+                ];
+
+                let mut auctions = HashMap::new();
+
+                match NodeRpcServiceClient::connect(node.to_string()).await {
+                    Ok(mut conn) => {
+                        match conn
+                            .first_block_hash(Request::new(FirstBlockHashRequest {}))
+                            .await
+                        {
+                            Ok(res) => match res.into_inner().hash {
+                                Some(mut hash) => {
+                                    let mut ended = HashSet::new();
+                                    loop {
+                                        match conn
+                                            .block_info(Request::new(BlockInfoRequest {
+                                                hash: hash.to_string(),
+                                            }))
+                                            .await
+                                        {
+                                            Ok(res) => {
+                                                let res = res.into_inner();
+                                                match res.block {
+                                                    Some(block) => {
+                                                        for t in block.transactions.iter() {
+                                                            match t.record.clone() {
+                                                            Some(blocktion::state::service::transaction::Record::StopAuctionRequest(stop_auction)) => {
+                                                                ended.insert(stop_auction.auction_id);
+                                                            },
+
+                                                            Some(blocktion::state::service::transaction::Record::CreateAuctionRequest(create_auction)) => {
+                                                                auctions.insert(create_auction.auction_id, (t.from.clone(), create_auction.start_amount, None, 0usize));
+                                                            },
+
+                                                            Some(blocktion::state::service::transaction::Record::BidRequest(bid)) => if let None = ended.get(&bid.auction_id) {
+                                                                let bids = auctions.get(&bid.auction_id); match bids {
+                                                                    Some((from, start_amount, Some(amount), n)) => {
+                                                                        auctions.insert(bid.auction_id, (from.to_string(), *start_amount, Some(u64::max(*amount, bid.amount)), n + 1usize));
+                                                                    }
+                                                                    Some((from, start_amount, None, n)) => {
+                                                                        auctions.insert(bid.auction_id, (from.to_string(), *start_amount, Some(u64::max(*start_amount, bid.amount)), n + 1usize));
+                                                                    }
+                                                                    None => {
+                                                                        continue;
+                                                                    }
+                                                                }
+                                                            }
+                                                            _ => continue,
+                                                        }
+                                                        }
+                                                    }
+                                                    _ => break,
+                                                };
+
+                                                hash = match res.next_block_hash {
+                                                    Some(h) => h,
+                                                    None => break,
+                                                };
+                                            }
+                                            _ => break,
+                                        }
+                                    }
+                                }
+                                None => {
+                                    popup = Some("There aren't auctions available.".to_string());
+                                }
+                            },
+                            Err(_) => {
+                                popup = Some("Couldn't connect to the node.".to_string());
+                            }
+                        };
+                    }
+                    Err(_) => popup = Some("Couldn't connect to the node.".to_string()),
+                }
+
+                let rows = auctions
+                    .into_iter()
+                    .map(|(auction_id, (from, start_amount, max_amount, count))| {
+                        let max_amount = match max_amount {
+                            Some(amount) => amount.to_string(),
+                            None => "NaN".to_string(),
+                        };
+                        Row::new([
+                            auction_id,
+                            from,
+                            max_amount,
+                            start_amount.to_string(),
+                            count.to_string(),
+                        ])
+                    })
+                    .collect::<Vec<Row>>();
+
+                let mut table_state = TableState::new();
+                table_state.select_first();
+
+                Self {
+                    table_state,
+                    popup,
+                    rows,
+                    header,
+                    widths,
+                }
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl<'a> Section for AvailableAuctions<'a> {
+            fn title(&self) -> String {
+                " Available Auctions ".to_string()
+            }
+
+            fn has_popup(&self) -> bool {
+                self.popup.is_some()
+            }
+
+            async fn handle_io(
+                &mut self,
+                input: ratatui_textarea::Input,
+            ) -> Option<Box<dyn Section>> {
+                match input {
+                    Input { key: Key::Up, .. } => {
+                        self.table_state.select_previous();
+                    }
+
+                    Input { key: Key::Down, .. } => {
+                        self.table_state.select_next();
+                    }
+
+                    Input {
+                        key: Key::Right, ..
+                    } => {
+                        self.table_state.select_next_column();
+                    }
+
+                    Input { key: Key::Left, .. } => {
+                        self.table_state.select_previous_column();
+                    }
+
+                    _ => {}
+                }
+
+                None
+            }
+
+            fn render(&mut self, r: &Rect, f: &mut Frame, focus: bool) {
+                let mut table = Table::new(self.rows.clone(), self.widths)
+                    .header(self.header.clone())
+                    .column_spacing(1)
+                    .highlight_symbol("* ".bold());
+
+                if focus {
+                    table = table.cell_highlight_style(
+                        Style::default().bold().bg(ratatui::style::Color::White),
+                    );
+                }
+
+                let [_, layout, _] = Layout::horizontal([
+                    Constraint::Min(2),
+                    Constraint::Percentage(80),
+                    Constraint::Min(2),
+                ])
+                .areas(*r);
+
+                let [_, layout, _] = Layout::vertical([
+                    Constraint::Min(2),
+                    Constraint::Percentage(80),
+                    Constraint::Min(2),
+                ])
+                .areas(layout);
+
+                f.render_stateful_widget(table, layout, &mut self.table_state);
+            }
         }
     }
 
@@ -1831,12 +2034,16 @@ mod dashboard {
     }
 
     impl Dashboard {
-        pub fn new(node: &str, public_key: &str) -> Self {
+        pub async fn new(node: &str, public_key: &str) -> Self {
             let mut options_state = ListState::default();
-            options_state.select(Some(1));
+            options_state.select(Some(0));
 
             let mut options: HashMap<(Page, usize), Box<dyn Section>> = HashMap::new();
 
+            options.insert(
+                (Page::Auctions, 0),
+                Box::new(AvailableAuctions::new(&node.to_string()).await),
+            );
             options.insert(
                 (Page::Auctions, 1),
                 Box::new(CreateAuction::new(node.to_string(), public_key.to_string())),
