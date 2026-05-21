@@ -3,3 +3,4 @@ security things added.
 limit rate of transaction submission -> avoid flooding -> since PoW doesn't protect against this.
 limit size of transaction pool -> also protects against flooding and avoids OOM on heavy traffic
 request longest chain of hashes after x amount of time in silence (gossip) -> avoids stalling and defends against gossip level eclipse attacks
+PoW for account creation with leading 0s to tackle sybil

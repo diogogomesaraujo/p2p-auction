@@ -192,13 +192,31 @@ impl DhtBehaviourEvent {
                     }
                 }
             }
-
             SwarmEvent::Behaviour(DhtBehaviourEvent::Gossip(event)) => match event {
-                libp2p_gossipsub::Event::Message {
+                gossipsub::Event::Message {
                     propagation_source,
                     message_id,
                     message,
                 } if message.topic.as_str() == topic::BLOCKS => {
+                    // PoW gate: reject blocks whose signed source PeerId was not mined
+                    match message.source {
+                        Some(source) if !crate::key::verify_peer_id(&source) => {
+                            warn!(
+                                "Rejecting block from {:?}: source PeerId does not satisfy PoW difficulty.",
+                                source
+                            );
+                            return Ok(());
+                        }
+                        None => {
+                            warn!(
+                                "Rejecting block from {:?}: no source PeerId on signed message.",
+                                propagation_source
+                            );
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+
                     info!(
                         "Received block through gossip from {:?}, id {:?}",
                         propagation_source, message_id
@@ -233,11 +251,11 @@ impl DhtBehaviourEvent {
                     );
                 }
 
-                libp2p_gossipsub::Event::GossipsubNotSupported { peer_id } => {
+                gossipsub::Event::GossipsubNotSupported { peer_id } => {
                     warn!("Gossipsub not supported by {:?}", peer_id);
                 }
 
-                libp2p_gossipsub::Event::SlowPeer {
+                gossipsub::Event::SlowPeer {
                     peer_id,
                     failed_messages,
                 } => {
@@ -247,11 +265,11 @@ impl DhtBehaviourEvent {
                     );
                 }
 
-                libp2p_gossipsub::Event::Subscribed { peer_id, topic } => {
-                    debug!("Peer {:?} subscribed to topic {}", peer_id, topic);
+                gossipsub::Event::Subscribed { peer_id, topic } => {
+                    info!("Peer {:?} subscribed to topic {}", peer_id, topic);
                 }
 
-                libp2p_gossipsub::Event::Unsubscribed { peer_id, topic } => {
+                gossipsub::Event::Unsubscribed { peer_id, topic } => {
                     debug!("Peer {:?} unsubscribed from topic {}", peer_id, topic);
                 }
             },

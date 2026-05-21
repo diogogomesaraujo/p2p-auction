@@ -1,10 +1,13 @@
 services:
     boot:
         image: p2p-auction
+        build: .
         environment:
             - MODE=boot
             - ARGS=--key-path config/boot1 --kad-port 63358 --rpc-port 3001
             - DELAY=0
+        volumes:
+            - ./config:/app/config
         networks:
             p2p-net:
                 ipv4_address: 10.0.0.2
@@ -13,6 +16,7 @@ services:
             - "3001:3001"
     node_1:
         image: p2p-auction
+        build: .
         stdin_open: true
         tty: true
         depends_on:
@@ -21,36 +25,44 @@ services:
                 restart: true
         environment:
             - MODE=main
-            - ARGS=--key-path config/node1 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt --rpc-port 3002
+            - ARGS=--key-path config/node1 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWJ98ECekNsi91ojHGfiZMw43FMmdg7GsFiLJXwBDLiWJy --rpc-port 3002
             - DELAY=0
+        volumes:
+            - ./config:/app/config
         networks:
             - p2p-net
         ports:
             - "3002:3002"
     node_2:
         image: p2p-auction
+        build: .
         depends_on:
             boot:
                 condition: service_started
                 restart: true
         environment:
             - MODE=main
-            - ARGS=--key-path config/node2 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt --rpc-port 3003
+            - ARGS=--key-path config/node2 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWJ98ECekNsi91ojHGfiZMw43FMmdg7GsFiLJXwBDLiWJy --rpc-port 3003
             - DELAY=0
+        volumes:
+            - ./config:/app/config
         networks:
             - p2p-net
         ports:
             - "3003:3003"
     node_3:
         image: p2p-auction
+        build: .
         depends_on:
             boot:
                 condition: service_started
                 restart: true
         environment:
             - MODE=main
-            - ARGS=--key-path config/node3 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWPJTsznbE7Axq6yXzTcFirB5DVU221mfR1q3eAeRziCWt --rpc-port 3004
+            - ARGS=--key-path config/node3 --boot-path /ip4/10.0.0.2/tcp/63358 --boot-key 12D3KooWJ98ECekNsi91ojHGfiZMw43FMmdg7GsFiLJXwBDLiWJy --rpc-port 3004
             - DELAY=0
+        volumes:
+            - ./config:/app/config
         networks:
             - p2p-net
         ports:
